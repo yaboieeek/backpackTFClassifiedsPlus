@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         backpackTFClassifieds+
 // @namespace    https://steamcommunity.com/profiles/76561198967088046
-// @version      1.7.3
+// @version      1.7.4
 // @description  adds some cool features to classifieds pages
 // @author       eeek
 // @match        https://backpack.tf/classifieds?*
@@ -14,8 +14,6 @@
 // @grant        GM_setValue
 // ==/UserScript==
 
-(function() {
-'use strict';
 // GM_setValue('blockedUsers', []);  // <----- BLOCKED-USERS-RESET (uncomment, run the script, comment)
 
 class Listing{
@@ -62,7 +60,7 @@ class Listing{
     }
 
     unblockUser(userID){
-       const blockedUsers = GM_getValue('blockedUsers') || [];
+        const blockedUsers = GM_getValue('blockedUsers') || [];
         GM_setValue('blockedUsers', blockedUsers.filter(user => user.id !== userID));
     }
 
@@ -88,7 +86,7 @@ class Listing{
         confirmButton.addEventListener('click', () => {
             this.blocked ?
                 this.unblockUser(this.listingData.listing_account_id)
-              : this.blockUser(userName, this.listingData.listing_account_id);
+            : this.blockUser(userName, this.listingData.listing_account_id);
             window.location.reload();
         });
         cancelButton.addEventListener('click', (e) => {
@@ -98,7 +96,7 @@ class Listing{
                                      );
 
         window.addEventListener('click', (e) => {
-           (e.target !== blockButton) && this.destroyTheModal(confirmationContainer);
+            (e.target !== blockButton) && this.destroyTheModal(confirmationContainer);
         })
 
     }
@@ -182,20 +180,20 @@ class StrangeListing extends Listing {
 
 
 class ListingsFactory {
-static createListing(listingElement) {
-    const listingData = listingElement.querySelector('.item').dataset;
-    if (listingData.listing_price === '' ) {
-        return new MarketplaceListing(listingElement, listingData);
+    static createListing(listingElement) {
+        const listingData = listingElement.querySelector('.item').dataset;
+        if (listingData.listing_price === '' ) {
+            return new MarketplaceListing(listingElement, listingData);
 
-    } else if (listingData.spell_1 && (listingData.listing_intent === 'buy')){
-        return new SpellListing(listingElement, listingData);
+        } else if (listingData.spell_1 && (listingData.listing_intent === 'buy')){
+            return new SpellListing(listingElement, listingData);
 
-    } else if ((listingData.listing_intent === 'buy') && ((listingData.quality_elevated) || (listingData.effect_id && listingData.quality === '11'))) {
-        return new StrangeListing(listingElement, listingData);
+        } else if ((listingData.listing_intent === 'buy') && ((listingData.quality_elevated) || (listingData.effect_id && listingData.quality === '11'))) {
+            return new StrangeListing(listingElement, listingData);
+        }
+
+        return new Listing(listingElement, listingData);
     }
-
-    return new Listing(listingElement, listingData);
-}
 }
 
 
@@ -260,8 +258,8 @@ class PageControl {
 
     addSidebars() {
         const [leftSidebar, rightSidebar] = [
-        document.createElement('div'),
-        document.createElement('div')
+            document.createElement('div'),
+            document.createElement('div')
         ];
 
         leftSidebar.classList.add('sidebar', 'left-sidebar');
@@ -293,7 +291,7 @@ class ListingsFiltersControl {
             bump_to_listed   : GM_getValue('bump_to_listed')  || false,
             autoscroll       : GM_getValue('autoscroll')      || false,
             'blocked_users': GM_getValue('blocked_users')     || false,
-    }
+        }
         console.log(this.blockedUsers);
 
         this.firstHeaderIndex = document.querySelectorAll('.panel-extras')[0].parentElement.innerText === 'Advertisement' ? 1 : 0;
@@ -387,49 +385,49 @@ class ListingsFiltersControl {
         this.hidingCfg.autoscroll && scroll.scrollToListings();
     }
 
-addRevealButtons() { //////////// it will only add buttons if certain listings appear
-    //////////// not sure if it's ok but as long as it works all g
-    const [mp, spell, strange, blocked] = [
-        this.listings.filter(listing => listing.isMarketplace),
-        this.listings.filter(listing => listing.isSpelled),
-        this.listings.filter(listing => listing.isStrange),
-        this.listings.filter(listing => listing.blocked),
-    ];
-    console.log(blocked)
-    ////we need to place mp button on the left cus mp orders cant be buy orders
-    const [sellOrderHeader, buyOrderHeader] = [
-    document.querySelectorAll('.panel-heading')[this.firstHeaderIndex].querySelector('.panel-extras'),
-    document.querySelectorAll('.panel-heading')[this.secondHeaderIndex].querySelector('.panel-extras'),
-    ];
+    addRevealButtons() { //////////// it will only add buttons if certain listings appear
+        //////////// not sure if it's ok but as long as it works all g
+        const [mp, spell, strange, blocked] = [
+            this.listings.filter(listing => listing.isMarketplace),
+            this.listings.filter(listing => listing.isSpelled),
+            this.listings.filter(listing => listing.isStrange),
+            this.listings.filter(listing => listing.blocked),
+        ];
+        console.log(blocked)
+        ////we need to place mp button on the left cus mp orders cant be buy orders
+        const [sellOrderHeader, buyOrderHeader] = [
+            document.querySelectorAll('.panel-heading')[this.firstHeaderIndex].querySelector('.panel-extras'),
+            document.querySelectorAll('.panel-heading')[this.secondHeaderIndex].querySelector('.panel-extras'),
+        ];
 
-    const createButtons = (category, categoryName) => {
-        const button = document.createElement('button');
-        button.style = 'color: black; line-height: 1';
+        const createButtons = (category, categoryName) => {
+            const button = document.createElement('button');
+            button.style = 'color: black; line-height: 1';
 
-        button.innerHTML = `Toggle <b>${category.length} ${categoryName}</b> listing${category.length > 1 ? 's' : ''}`;
-        button.className = 'toggle-button';
+            button.innerHTML = `Toggle <b>${category.length} ${categoryName}</b> listing${category.length > 1 ? 's' : ''}`;
+            button.className = 'toggle-button';
 
-        button.addEventListener('click', () => {
-            for (const listing of category) {
-               categoryName === 'blocked' ?
-                   listing.toggleBlockedVisibility()
-               : listing.toggleVisibility();
+            button.addEventListener('click', () => {
+                for (const listing of category) {
+                    categoryName === 'blocked' ?
+                        listing.toggleBlockedVisibility()
+                    : listing.toggleVisibility();
+                }
+            });
+
+            //append mp on the left
+            if (['mp', 'blocked'].includes(categoryName)) {
+                sellOrderHeader.append(button);
+                return;
             }
-        });
-
-       //append mp on the left
-        if (['mp', 'blocked'].includes(categoryName)) {
-            sellOrderHeader.append(button);
-            return;
+            // append other buttons on the right
+            buyOrderHeader.append(button);
         }
-        // append other buttons on the right
-        buyOrderHeader.append(button);
+        if (mp.length >= 1)       createButtons(mp, 'mp');
+        if (spell.length >= 1 )   createButtons(spell, 'spell');
+        if (strange.length >= 1 ) createButtons(strange, 'strange');
+        if (blocked.length >= 1 ) createButtons(blocked, 'blocked');
     }
-    if (mp.length >= 1)       createButtons(mp, 'mp');
-    if (spell.length >= 1 )   createButtons(spell, 'spell');
-    if (strange.length >= 1 ) createButtons(strange, 'strange');
-    if (blocked.length >= 1 ) createButtons(blocked, 'blocked');
- }
 }
 
 class initializeStatPage {
@@ -459,6 +457,11 @@ class initializeStatPage {
         {
             baseLink: 'https://next.backpack.tf/classifieds/snapshots/',
             siteName: 'Next snapshots',
+            textIcon: true
+        },
+        {
+            baseLink: 'https://archivist.tf/history?item=',
+            siteName: 'Archivist.tf',
             textIcon: true
         }
 
@@ -509,6 +512,7 @@ class initializeStatPage {
             repres = document.createElement('i');
             switch (siteData.siteName) {
                 case 'Mannco.store': repres.className = 'fa fa-money'; break;
+                case 'Archivist.tf': repres.className = 'fa fa-archive'; break;
                 default: repres.className = 'fa fa-camera'; break;
             }
         } else {
@@ -541,13 +545,16 @@ class initializeStatPage {
             case 'Marketplace.tf' : { // defindex -> ; quality -> 5; effect with 'u' -> 'u'effect_id
                 link+= `${itemData.defindex};5;u${itemData.effect_id}`;
                 break;
+            };
+            case 'Archivist.tf' : {
+                link += (this.itemData.quality_elevated ? 'Strange ' : '') + this.itemData.effect_name +' ' + this.itemData.name + `&at=${convertCurrentDayToDateTail()}`;
+                break;
             }
-             default: {
-                 link += itemData.effect_name +' ' + itemData.name;
-                 break;
-             }
+            default: {
+                link += itemData.effect_name +' ' + itemData.name;
+                break;
+            }
         }
-        console.log(link);
         return link;
     }
     makeButtonsAndAppend(sitesDataArray = [], itemData) {
@@ -557,7 +564,7 @@ class initializeStatPage {
         const buttons = sitesDataArray
         .filter(siteData => !(this.hasMpLink && siteData.siteName === 'Marketplace.tf'))
         .map(siteData => {
-           return this.generateSiteButton(siteData, itemData);
+            return this.generateSiteButton(siteData, itemData);
         });
         const buttonsContainer = document.createElement('div');
         buttonsContainer.style = 'width: 100%; height: min-content; display: flex; flex-wrap: wrap';
@@ -706,7 +713,7 @@ class statPageModulesControl { //because oh boy i dont care about the fkin paint
     toggleModule(module) { /// because the first one is really weird, i mean whole page is weird but lol
         console.log(module.moduleName);
         if (!module.exists
-        || (['classifieds', 'Suggestions'].includes(module.moduleName))) return;
+            || (['classifieds', 'Suggestions'].includes(module.moduleName))) return;
 
         if (module.moduleName === 'Item Instances Graph') {
             this.modules[0].elements.forEach((elem, index) => (index !== 2) && elem.classList.toggle('hidden'));
@@ -727,7 +734,7 @@ class statPageModulesControl { //because oh boy i dont care about the fkin paint
     }
 
 
-        createList(toggleSelectButton) {
+    createList(toggleSelectButton) {
 
         const filtersContainer = document.createElement('div');
         filtersContainer.className = 'hidden filters-container stats-filters';
@@ -802,7 +809,11 @@ if (window.location.href.match(/^https:\/\/backpack\.tf\/stats\/?.*$/)) {
     new initializeStatPage();
     new statPageModulesControl();
 }
-
+function convertCurrentDayToDateTail($timecol = null) {
+    const rawDate = $timecol ? $timecol.innerText.trim() : Date.now();
+    const dateTail = new Date(rawDate).toISOString().split('T')[0];
+    return dateTail
+}
 const darkModeStyle = document.createElement('style');
 darkModeStyle.innerHTML =
     `
@@ -1059,4 +1070,3 @@ width: 250px
 </style>`
 
 const importantStuff = 'https://youtu.be/YWyHZNBz6FE?si=nPqzkUKc3kCtJQ2Z';
-})();
