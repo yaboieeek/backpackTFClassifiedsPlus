@@ -1,6 +1,7 @@
 # backpackTFClassifieds+
 ## What it does:
 This script adds: 
+  - Bunch of buttons on unu stat page
   - Marketplace crosslist listings toggler
   - Strange (unusual) buyorders toggler
   - Spell buyorders toggler
