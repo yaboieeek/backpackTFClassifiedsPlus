@@ -1,6 +1,5 @@
-# backpackTFClassifieds+
-## What it does:
-This script adds: 
+# Backpack Classifieds+
+**This script adds:** 
   - Bunch of buttons on unu stat page
   - Marketplace crosslist listings toggler
   - Strange (unusual) buyorders toggler
@@ -18,7 +17,7 @@ To install the script, press [here](https://github.com/yaboieeek/backpack-tf-cro
 
 ## Usage 
 >[!WARNING]
->The script only works on __classifieds page__
+>The script only works with unusuals
 ### Filters & Listing controls
 - Open the classifieds page. Button with settings will appear on the buyorders header: 
 ![buyorder-header-screenshot](https://github.com/user-attachments/assets/b96ce687-8075-40d5-b03f-8da686aceee8)
