@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         backpackTFClassifieds+
 // @namespace    https://steamcommunity.com/profiles/76561198967088046
-// @version      2.0
+// @version      2.0.1
 // @description  Rethinks backpack interface. Well, how I, eeek, rethink it, and hopefully yall like it 
 // @author       eeek
 // @match        https://backpack.tf/classifieds?*
@@ -1644,7 +1644,7 @@ footer {
 
   // src/utils/removeAdOnCurrentPage.js
   function removeAdOnCurrentPage() {
-    document.querySelector("#media-topbox").closest(".panel").remove();
+    document.querySelector("#media-topbox")?.closest(".panel")?.remove();
   }
 
   // src/router/index.js
