@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         backpackTFClassifieds+
 // @namespace    https://steamcommunity.com/profiles/76561198967088046
-// @version      2.2
-// @description  very cool stuff for very cool people 
+// @version      2.3
+// @description  adds some cool features to classifieds pages
 // @author       eeek
 // @match        https://backpack.tf/classifieds?*
 // @match        https://backpack.tf/stats/*
@@ -1654,6 +1654,7 @@ h5 .bcp-stn-icon {
 
 .bcp-custom-buttons-panel .bcp-custom-buttons-footer {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: flex-end;
     gap: 8px;
@@ -1670,6 +1671,19 @@ h5 .bcp-stn-icon {
     display: block;
     margin-bottom: 4px;
     font-weight: 600;
+}
+
+.bcp-custom-buttons-panel .bcp-custom-buttons-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    font-weight: 400;
+    cursor: pointer;
+}
+
+.bcp-custom-buttons-panel .bcp-custom-buttons-checkbox input {
+    margin: 0;
 }
 
 .bcp-custom-buttons-panel .help-block {
@@ -2162,6 +2176,18 @@ h5 .bcp-stn-icon {
     }
   };
 
+  // src/utils/copyText.js
+  async function copyText(text) {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+    let $textarea = document.createElement("textarea");
+    $textarea.value = text, $textarea.style.position = "fixed", $textarea.style.opacity = "0", document.body.append($textarea), $textarea.select();
+    let copied = document.execCommand("copy");
+    if ($textarea.remove(), !copied) throw new Error("Clipboard copy failed");
+  }
+
   // src/features/StatsLinks/customButtons.js
   var customButtonsStorageKey = "custom_site_buttons", defaultStripCharacters = "'!(|):", defaultSpaceReplacer = "+", variablePattern = /\{([a-zA-Z0-9_]+)\}/g, cleanValue = (value, stripCharacters = "") => {
     let text = String(value ?? "").trim();
@@ -2169,21 +2195,68 @@ h5 .bcp-stn-icon {
       (cleaned, character) => cleaned.split(character).join(""),
       text
     ) : text;
-  }, applyCustomTemplate = (template = "", itemData = {}, { strip = "", space = "" } = {}) => String(template ?? "").replace(variablePattern, (_, key) => cleanValue(itemData[key], strip).replace(/\s+/g, () => space)), createCustomButtonId = () => `custom_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`, normalizeCustomButton = (button = {}) => ({
+  }, applyCustomTemplate = (template = "", itemData = {}, { strip = "", space = "", lowercase = !1 } = {}) => String(template ?? "").replace(variablePattern, (_, key) => {
+    let value = cleanValue(itemData[key], strip);
+    return lowercase && (value = value.toLowerCase()), value.replace(/\s+/g, () => space);
+  }), createCustomButtonId = () => `custom_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`, normalizeCustomButton = (button = {}) => ({
     id: button.id || createCustomButtonId(),
     name: typeof button.name == "string" ? button.name : "",
     link: typeof button.link == "string" ? button.link : "",
     icon: typeof button.icon == "string" ? button.icon : "",
     strip: typeof button.strip == "string" ? button.strip : defaultStripCharacters,
-    space: typeof button.space == "string" ? button.space : defaultSpaceReplacer
+    space: typeof button.space == "string" ? button.space : defaultSpaceReplacer,
+    lowercase: !!button.lowercase
   }), getCustomButtons = () => {
     let stored = gmStorage_default.get(customButtonsStorageKey, []);
     return Array.isArray(stored) ? stored.map(normalizeCustomButton).filter((button) => button.link.trim()) : [];
   }, saveCustomButtons = (buttons = []) => gmStorage_default.set(
     customButtonsStorageKey,
     buttons.map(normalizeCustomButton).filter((button) => button.link.trim())
-  ), buildCustomLink = (button, itemData) => applyCustomTemplate(button.link, itemData, button), buildCustomName = (button, itemData) => applyCustomTemplate(button.name, itemData, button).trim() || "Custom button", buildCustomIcon = (button, itemData, resolvedLink) => {
-    let icon = applyCustomTemplate(button.icon, itemData, button).trim();
+  ), shareParamNames = Object.freeze({
+    name: "bcp_name",
+    link: "bcp_link",
+    icon: "bcp_icon",
+    strip: "bcp_strip",
+    space: "bcp_space",
+    lowercase: "bcp_lowercase"
+  }), unsafeLinkPattern = /^\s*(?:javascript|data|vbscript):/i, removeShareParams = (url) => {
+    Object.values(shareParamNames).forEach(
+      (param) => url.searchParams.delete(param)
+    );
+  }, isSameButton = (first, second) => first.name === second.name && first.link === second.link && first.icon === second.icon && first.strip === second.strip && first.space === second.space && first.lowercase === second.lowercase, buildShareUrl = (button, baseUrl = window.location.href) => {
+    let url = new URL(baseUrl);
+    return removeShareParams(url), url.searchParams.set(shareParamNames.name, button.name ?? ""), url.searchParams.set(shareParamNames.link, button.link ?? ""), url.searchParams.set(shareParamNames.icon, button.icon ?? ""), url.searchParams.set(shareParamNames.strip, button.strip ?? ""), url.searchParams.set(shareParamNames.space, button.space ?? ""), button.lowercase && url.searchParams.set(shareParamNames.lowercase, "1"), url.toString();
+  }, importSharedButton = () => {
+    let params = new URLSearchParams(window.location.search);
+    if (!params.has(shareParamNames.link)) return null;
+    let button = normalizeCustomButton({
+      name: params.get(shareParamNames.name) ?? "",
+      link: params.get(shareParamNames.link) ?? "",
+      icon: params.get(shareParamNames.icon) ?? "",
+      strip: params.get(shareParamNames.strip) ?? defaultStripCharacters,
+      space: params.get(shareParamNames.space) ?? defaultSpaceReplacer,
+      lowercase: params.get(shareParamNames.lowercase) === "1"
+    }), url = new URL(window.location.href);
+    if (removeShareParams(url), window.history.replaceState(null, "", url.toString()), !button.link.trim() || unsafeLinkPattern.test(button.link)) return null;
+    let buttons = getCustomButtons();
+    return buttons.some((existing) => isSameButton(existing, button)) ? null : (saveCustomButtons([...buttons, button]), button);
+  }, addReferral = (link) => {
+    if (!link) return link;
+    try {
+      let url = new URL(link, window.location.href);
+      return url.searchParams.set("ref", "eeekwashere"), url.toString();
+    } catch {
+      let separator = link.includes("?") ? "&" : "?";
+      return `${link}${separator}ref=eeekwashere`;
+    }
+  }, buildCustomLink = (button, itemData) => addReferral(applyCustomTemplate(button.link, itemData, button)), buildCustomName = (button, itemData) => applyCustomTemplate(button.name, itemData, {
+    ...button,
+    lowercase: !1
+  }).trim() || "Custom button", buildCustomIcon = (button, itemData, resolvedLink) => {
+    let icon = applyCustomTemplate(button.icon, itemData, {
+      ...button,
+      lowercase: !1
+    }).trim();
     if (icon)
       return /^fa[srb]?\s/.test(icon) || icon.startsWith("fa-") ? {
         iconClass: icon.startsWith("fa-") ? `fa ${icon}` : icon
@@ -2269,14 +2342,20 @@ h5 .bcp-stn-icon {
           help: "Characters removed from every variable value."
         }),
         this._createSpaceGroup(),
+        this._createLowercaseGroup(),
         this._createPreviewGroup()
       ), $body;
     }
     _createFooter() {
       let $footer = document.createElement("div");
       $footer.className = "panel-footer bcp-custom-buttons-footer", this.$status = document.createElement("span"), this.$status.className = "bcp-custom-buttons-status", this.$save = document.createElement("button"), this.$save.type = "button", this.$save.className = "btn btn-primary btn-sm", this.$save.textContent = "Add button", this.$save.addEventListener("click", () => this._handleSave());
+      let $share = document.createElement("button");
+      $share.type = "button", $share.className = "btn btn-default btn-sm", $share.textContent = "Copy share link", $share.title = "Copy a backpack.tf link that adds this button", $share.addEventListener(
+        "click",
+        () => this._copyShareLink(this._readForm())
+      );
       let $cancel = document.createElement("button");
-      return $cancel.type = "button", $cancel.className = "btn btn-default btn-sm", $cancel.textContent = "Close", $cancel.addEventListener("click", () => this.close()), $footer.append(this.$status, $cancel, this.$save), $footer;
+      return $cancel.type = "button", $cancel.className = "btn btn-default btn-sm", $cancel.textContent = "Close", $cancel.addEventListener("click", () => this.close()), $footer.append(this.$status, $share, $cancel, this.$save), $footer;
     }
     _createInput(placeholder, trackVariable = !0) {
       let $input = document.createElement("input");
@@ -2316,6 +2395,19 @@ h5 .bcp-stn-icon {
         ...keys.filter((key) => !preferredVariableKeys.includes(key))
       ];
     }
+    _createLowercaseGroup() {
+      let $group = document.createElement("div");
+      $group.className = "form-group";
+      let $label = document.createElement("label");
+      $label.className = "bcp-custom-buttons-checkbox", this.$lowercase = document.createElement("input"), this.$lowercase.type = "checkbox", this.$lowercase.addEventListener(
+        "change",
+        () => this._updatePreview()
+      );
+      let $text = document.createElement("span");
+      $text.textContent = "Lowercase variables in the link";
+      let $help = document.createElement("p");
+      return $help.className = "help-block", $help.textContent = "Converts link variables to lowercase before replacing spaces.", $label.append(this.$lowercase, " ", $text), $group.append($label, $help), $group;
+    }
     _createVariableList() {
       let $variables = document.createElement("div");
       $variables.className = "bcp-custom-buttons-variables";
@@ -2345,7 +2437,8 @@ h5 .bcp-stn-icon {
         link: this.$link.value.trim(),
         icon: this.$icon.value.trim(),
         strip: this.$strip.value,
-        space: this.$space.value
+        space: this.$space.value,
+        lowercase: this.$lowercase.checked
       };
     }
     _updatePreview() {
@@ -2379,21 +2472,37 @@ h5 .bcp-stn-icon {
         $template.className = "bcp-custom-buttons-row-template", $template.textContent = button.link, $template.title = button.link, $info.append($name, $template);
         let $actions = document.createElement("div");
         $actions.className = "bcp-custom-buttons-row-actions";
+        let $share = document.createElement("button");
+        $share.type = "button", $share.className = "btn btn-default btn-xs", $share.title = "Copy share link", $share.innerHTML = '<i class="fa fa-link"></i>', $share.addEventListener(
+          "click",
+          () => this._copyShareLink(button)
+        );
         let $edit = document.createElement("button");
         $edit.type = "button", $edit.className = "btn btn-default btn-xs", $edit.title = "Edit", $edit.innerHTML = '<i class="fa fa-pencil"></i>', $edit.addEventListener("click", () => this._edit(button.id));
         let $delete = document.createElement("button");
-        $delete.type = "button", $delete.className = "btn btn-danger btn-xs", $delete.title = "Delete", $delete.innerHTML = '<i class="fa fa-trash"></i>', $delete.addEventListener("click", () => this._delete(button.id)), $actions.append($edit, $delete), $row.append($preview, $info, $actions), this.$list.append($row);
+        $delete.type = "button", $delete.className = "btn btn-danger btn-xs", $delete.title = "Delete", $delete.innerHTML = '<i class="fa fa-trash"></i>', $delete.addEventListener("click", () => this._delete(button.id)), $actions.append($share, $edit, $delete), $row.append($preview, $info, $actions), this.$list.append($row);
       });
     }
     _edit(id) {
       let button = this.buttons.find((entry) => entry.id === id);
-      button && (this.editingId = id, this.$name.value = button.name, this.$link.value = button.link, this.$icon.value = button.icon, this.$strip.value = button.strip, this.$space.value = button.space, this.$formTitle.textContent = "Edit custom button", this.$save.textContent = "Update button", this._updatePreview(), this.$name.focus());
+      button && (this.editingId = id, this.$name.value = button.name, this.$link.value = button.link, this.$icon.value = button.icon, this.$strip.value = button.strip, this.$space.value = button.space, this.$lowercase.checked = !!button.lowercase, this.$formTitle.textContent = "Edit custom button", this.$save.textContent = "Update button", this._updatePreview(), this.$name.focus());
     }
     _delete(id) {
       let button = this.buttons.find((entry) => entry.id === id);
       if (!button) return;
       let name = buildCustomName(button, this.itemData);
       window.confirm(`Delete "${name}"?`) && (saveCustomButtons(this.buttons.filter((entry) => entry.id !== id)), this.editingId === id && this._resetForm(), this._refreshList(), this._updatePreview(), this.onChange());
+    }
+    async _copyShareLink(button) {
+      if (!button.link) {
+        this._setStatus("Link template is required.", !0), this.$link.focus();
+        return;
+      }
+      try {
+        await copyText(buildShareUrl(button)), this._setStatus("Share link copied.", !1);
+      } catch (error) {
+        console.error("Custom button share link failed:", error), this._setStatus("Could not copy the share link.", !0);
+      }
     }
     _handleSave() {
       let button = this._readForm();
@@ -2407,7 +2516,7 @@ h5 .bcp-stn-icon {
       saveCustomButtons(nextButtons), this._resetForm(), this._refreshList(), this._updatePreview(), this.onChange(), this._setStatus("Saved.", !1);
     }
     _resetForm() {
-      this.editingId = null, this.$name.value = "", this.$link.value = "", this.$icon.value = "", this.$strip.value = defaultStripCharacters, this.$space.value = defaultSpaceReplacer, this.$formTitle.textContent = "Add custom button", this.$save.textContent = "Add button", this.$link.focus();
+      this.editingId = null, this.$name.value = "", this.$link.value = "", this.$icon.value = "", this.$strip.value = defaultStripCharacters, this.$space.value = defaultSpaceReplacer, this.$lowercase.checked = !1, this.$formTitle.textContent = "Add custom button", this.$save.textContent = "Add button", this.$link.focus();
     }
     _setStatus(message, isError) {
       this.$status.textContent = message, this.$status.className = `bcp-custom-buttons-status ${isError ? "text-danger" : "text-success"}`;
@@ -2480,7 +2589,7 @@ h5 .bcp-stn-icon {
     "Marketplace"
   ), StatsLinks = class _StatsLinks {
     constructor() {
-      this.itemData = document.querySelector(
+      importSharedButton(), this.itemData = document.querySelector(
         ".stats-header-item > .item"
       )?.dataset, this.itemData && (this.$itemName = document.querySelector(".stats-header-title"), this._splitTitle(), this._makeStrangeNameClickable(), this._renderSiteLinks());
     }
