@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         backpackTFClassifieds+
 // @namespace    https://steamcommunity.com/profiles/76561198967088046
-// @version      2.3
-// @description  adds some cool features to classifieds pages
+// @version      2.4
+// @description  YUHH
 // @author       eeek
 // @match        https://backpack.tf/classifieds?*
 // @match        https://backpack.tf/stats/*
+// @match        https://backpack.tf/profiles/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=backpack.tf
 // @source       https://github.com/yaboieeek/backpackTFClassifiedsPlus/
 // @updateURL https://github.com/yaboieeek/backpackTFClassifiedsPlus/raw/refs/heads/main/backpackTFClassifiedsPlus.user.js
@@ -13,6 +14,7 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_xmlhttpRequest
+// @grant        unsafeWindow
 // @connect      stntrading.eu
 // ==/UserScript==
 
@@ -758,6 +760,23 @@ h2 {
 
 `;
 
+  // src/styles/backpackPage.js
+  var backpackPage_default = `
+.bcp-cache-button .fa {
+    margin-right: 4px;
+}
+
+.bcp-cache-status {
+    display: inline-block;
+    margin-left: 8px;
+    color: #777;
+    font-size: 11px;
+    line-height: 1.4;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+`;
+
   // src/styles/classifieds.js
   var classifieds_default = `
 .sidebar {
@@ -1490,10 +1509,12 @@ h5 .bcp-stn-icon {
     display: none;
 }
 
-/* the header item and the quick access module share one row */
+/* the header item and the quick access module share one row;
+   the collapsible quick-list panel wraps onto its own row */
 .stats-header-row {
     display: flex;
     flex-direction: row;
+    flex-wrap: wrap;
     align-items: flex-start;
     column-gap: 1rem;
     width: 100%;
@@ -1849,6 +1870,204 @@ h5 .bcp-stn-icon {
     margin-right: auto;
     font-size: 12px;
 }
+
+/* collapsible quick-list panel inside the stats header row */
+.bcp-quick-list {
+    flex: 1 1 100%;
+    width: 100%;
+    margin-top: 12px;
+    margin-bottom: 1rem;
+    border: 1px dashed #d8d8d8;
+    border-radius: 4px;
+    background: #fafafa;
+    overflow: hidden;
+}
+
+.bcp-quick-list-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    margin: 0;
+    padding: 8px 10px;
+    border: 0;
+    border-bottom: 1px dashed #d8d8d8;
+    background: #f4f4f4;
+    color: #444;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+}
+
+.bcp-quick-list-toggle:focus-visible {
+    outline: 2px solid #66afe9;
+    outline-offset: -2px;
+}
+
+.bcp-quick-list-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+}
+
+.bcp-quick-list-head-meta {
+    margin-left: auto;
+    color: #888;
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.bcp-quick-list-caret {
+    color: #777;
+    transition: transform 0.15s ease;
+}
+
+.bcp-quick-list-toggle[aria-expanded="true"] .bcp-quick-list-caret {
+    transform: rotate(180deg);
+}
+
+.bcp-quick-list .bcp-quick-list-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px 10px;
+    border: 0;
+    background: #fafafa;
+}
+
+.bcp-quick-list .bcp-quick-list-body[hidden] {
+    display: none !important;
+}
+
+.bcp-quick-list-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.bcp-quick-list-row {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    border: 1px solid #d8d8d8;
+    border-radius: 4px;
+    background: #fff;
+}
+
+.bcp-quick-list-row[aria-busy="true"] {
+    opacity: 0.65;
+}
+
+.bcp-quick-list-row.is-listed {
+    background: #f7f7f7;
+}
+
+.bcp-quick-list-row-info {
+    flex: 1 1 160px;
+    min-width: 0;
+    overflow: hidden;
+    color: #555;
+    font-size: 12px;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.bcp-quick-list-item-link {
+    color: #54748b;
+    text-decoration: none;
+}
+
+.bcp-quick-list-item-link:hover {
+    text-decoration: underline;
+}
+
+.bcp-quick-list-currency {
+    flex: 0 0 120px;
+    width: 120px;
+    max-width: 100%;
+}
+
+.bcp-quick-list-currency .input-group-addon {
+    padding: 4px 6px;
+    border-color: #c8c8c8;
+    background: #f2f2f2;
+    color: #555;
+    font-size: 11px;
+}
+
+.bcp-quick-list-currency .form-control {
+    height: 30px;
+    padding: 4px 6px;
+}
+
+.bcp-quick-list-publish {
+    flex: 0 0 auto;
+}
+
+.bcp-quick-list .form-control {
+    height: 32px;
+    padding: 5px 8px;
+    border: 1px solid #c8c8c8;
+    border-radius: 3px;
+    background: #fff;
+    color: #333;
+    font-size: 12px;
+    box-shadow: none;
+}
+
+.bcp-quick-list .form-control:focus {
+    border-color: #66afe9;
+    outline: 0;
+    box-shadow: 0 0 3px rgba(102, 175, 233, 0.45);
+}
+
+.bcp-quick-list .form-control:focus-visible {
+    outline: 2px solid #66afe9;
+    outline-offset: 1px;
+}
+
+.bcp-quick-list .form-control:user-invalid {
+    border-color: #d93025;
+    background: #fce8e6;
+}
+
+.bcp-quick-list .help-block {
+    margin: 0;
+    color: #888;
+    font-size: 11px;
+}
+
+.bcp-quick-list-status {
+    min-height: 16px;
+    margin: 0;
+    font-size: 12px;
+}
+
+@media (max-width: 700px) {
+    .bcp-quick-list-row {
+        flex-wrap: wrap;
+    }
+
+    .bcp-quick-list-row-info {
+        flex: 1 1 100%;
+    }
+
+    .bcp-quick-list-currency {
+        flex: 1 1 120px;
+        width: auto;
+    }
+}
+
+body.bcp-hide-quick-list .bcp-quick-list,
+body.bcp-hide-add-button .bcp-add-button {
+    display: none !important;
+}
 `;
 
   // src/styles/index.js
@@ -1869,6 +2088,9 @@ h5 .bcp-stn-icon {
   }
   function injectStatsPageStyles() {
     injectListingStyles(), injectStyle(statsPage_default, "bcp-stats-page-styles");
+  }
+  function injectBackpackPageStyles() {
+    injectCommonStyles(), injectStyle(backpackPage_default, "bcp-backpack-page-styles");
   }
 
   // src/pages/classifiedsPage.js
@@ -1904,10 +2126,560 @@ h5 .bcp-stn-icon {
     }
   };
 
+  // src/global/index.js
+  var GlobalUserData = class _GlobalUserData {
+    static get pageWindow() {
+      return typeof unsafeWindow < "u" ? unsafeWindow : window;
+    }
+    static get session() {
+      return _GlobalUserData.pageWindow?.Session ?? null;
+    }
+    static get steamID64() {
+      let sessionId = _GlobalUserData.session?.steamid;
+      return sessionId ? String(sessionId) : document.querySelector(".username a")?.href.split("/").at(-1) ?? null;
+    }
+    static get appId() {
+      let appId = _GlobalUserData.session?.appid;
+      return appId != null ? String(appId) : null;
+    }
+    static get csrfToken() {
+      return _GlobalUserData.session?.csrf ?? null;
+    }
+    static get listingToken() {
+      let match = document.querySelector('a[href^="/logout"]')?.getAttribute("href")?.match(/[?&]user-id=([^&]+)/);
+      return match ? decodeURIComponent(match[1]) : _GlobalUserData.csrfToken;
+    }
+  };
+
+  // src/utils/waitForCondition.js
+  function waitForCondition(predicate, { timeout = 3e4, interval = 200 } = {}) {
+    return new Promise((resolve, reject) => {
+      if (predicate()) {
+        resolve();
+        return;
+      }
+      let startedAt = Date.now(), timer = setInterval(() => {
+        if (predicate()) {
+          clearInterval(timer), resolve();
+          return;
+        }
+        Date.now() - startedAt > timeout && (clearInterval(timer), reject(new Error("Timed out waiting for the page")));
+      }, interval);
+    });
+  }
+
+  // src/features/InventoryCache/const.js
+  var legacyInventoryCacheKey = "ITEMS_CACHE", inventoryCacheKey = (steamId, appId) => `inventory_cache_v2_${steamId}_${appId}`, inventorySkuFields = [
+    "app",
+    "defindex",
+    "quality",
+    "effect_id",
+    "craftable",
+    "tradable",
+    "wear_tier",
+    "ks_tier",
+    "paint_kit",
+    "australium",
+    "festivized"
+  ];
+
+  // src/features/InventoryCache/sku.js
+  var normalizePart = (value) => `${value ?? ""}`.trim().toLowerCase();
+  function skuFromData(data = {}) {
+    return inventorySkuFields.map((field) => `${field}:${normalizePart(data[field])}`).join("|");
+  }
+
+  // src/features/InventoryCache/index.js
+  var itemFields = [
+    "app",
+    "defindex",
+    "quality",
+    "effect_id",
+    "craftable",
+    "tradable",
+    "unlistable",
+    "listing_intent",
+    "listing_price",
+    "name",
+    "effect_name",
+    "level",
+    "summary",
+    "wear_tier",
+    "ks_tier",
+    "paint_kit",
+    "australium",
+    "festivized"
+  ], asString = (value) => value == null ? "" : String(value), inventoryEndpoint = (steamId) => `/_inventory/${encodeURIComponent(steamId)}?time=&source=steam&fallback=true`, isCacheableItem = (data = {}) => !!data.id && asString(data.tradable) === "1" && asString(data.unlistable) !== "1", toCacheItem = (data = {}) => {
+    let item = {
+      id: asString(data.id),
+      sku: skuFromData(data)
+    };
+    return itemFields.forEach((field) => {
+      item[field] = asString(data[field]);
+    }), item;
+  }, emptyCache = (steamId, appId) => ({
+    version: 2,
+    steamId: asString(steamId),
+    appId: asString(appId),
+    updatedAt: 0,
+    items: []
+  }), normalizeItems = (items) => (Array.isArray(items) ? items : []).map(toCacheItem).filter((item) => item.id), InventoryCache = class _InventoryCache {
+    static load(steamId, appId) {
+      if (!steamId || !appId) return emptyCache(steamId, appId);
+      let stored = gmStorage_default.get(inventoryCacheKey(steamId, appId), null);
+      return stored?.items ? {
+        ...emptyCache(steamId, appId),
+        ...stored,
+        version: 2,
+        steamId: asString(steamId),
+        appId: asString(appId),
+        updatedAt: Number(stored.updatedAt) || 0,
+        items: normalizeItems(stored.items)
+      } : _InventoryCache._migrateLegacy(steamId, appId);
+    }
+    static save(steamId, appId, items) {
+      return _InventoryCache._write(steamId, appId, items, Date.now());
+    }
+    /**
+     * Loads the full backpack JSON endpoint used by the profile page.
+     * It works even when the rendered inventory reports a fallback error.
+     */
+    static async loadBackpack(steamId, appId = null) {
+      if (!steamId) throw new Error("Missing Steam ID");
+      let response = await fetch(inventoryEndpoint(steamId), {
+        credentials: "same-origin"
+      });
+      if (!response.ok)
+        throw new Error(`Inventory request failed (${response.status})`);
+      let payload = await response.json();
+      if (!payload?.html) throw new Error("Inventory response has no items");
+      let items = [...new DOMParser().parseFromString(payload.html, "text/html").querySelectorAll(".item:not(.spacer)")].map(($item) => ({ ...$item.dataset })).filter(isCacheableItem).map(toCacheItem), resolvedAppId = items[0]?.app || asString(appId) || "440";
+      return _InventoryCache._write(
+        steamId,
+        resolvedAppId,
+        items,
+        Date.now()
+      );
+    }
+    static removeItem(steamId, appId, itemId) {
+      let cache = _InventoryCache.load(steamId, appId), items = cache.items.filter((item) => item.id !== asString(itemId));
+      return _InventoryCache._write(
+        steamId,
+        appId,
+        items,
+        cache.updatedAt
+      );
+    }
+    static getItemsForSku(cache, sku) {
+      return (cache?.items ?? []).filter((item) => item.sku === sku);
+    }
+    static _write(steamId, appId, items, updatedAt) {
+      let cache = {
+        version: 2,
+        steamId: asString(steamId),
+        appId: asString(appId),
+        updatedAt,
+        items: normalizeItems(items)
+      };
+      return gmStorage_default.set(inventoryCacheKey(steamId, appId), cache), cache;
+    }
+    /**
+     * The standalone caching script kept one item per SKU in `ITEMS_CACHE`.
+     * Import that snapshot once so users do not have to re-cache immediately.
+     */
+    static _migrateLegacy(steamId, appId) {
+      let raw = gmStorage_default.get(legacyInventoryCacheKey, null);
+      if (!raw) return emptyCache(steamId, appId);
+      try {
+        let entries = JSON.parse(raw), items = (Array.isArray(entries) ? entries : []).map((entry) => Array.isArray(entry) ? entry[1] : entry).filter(isCacheableItem).filter(
+          (item) => !item.app || asString(item.app) === asString(appId)
+        ).map(toCacheItem);
+        return items.length ? _InventoryCache._write(
+          steamId,
+          appId,
+          items,
+          Date.now()
+        ) : emptyCache(steamId, appId);
+      } catch (error) {
+        return console.warn("Could not migrate the legacy inventory cache:", error), emptyCache(steamId, appId);
+      }
+    }
+  };
+
+  // src/features/InventoryCache/BackpackCacheButton.js
+  var toolbarSelector = "#inventory-toolbar", itemSelector = ".item:not(.spacer)", buttonId = "bcp-cache-inventory", formatCount = (count) => `${count} ${count === 1 ? "item" : "items"}`, BackpackCacheButton = class {
+    constructor() {
+      this.$button = null, this.$status = null, this.steamId = GlobalUserData.steamID64, this.appId = GlobalUserData.appId, this._isSaving = !1, this._didSave = !1;
+    }
+    async init() {
+      if (this.steamId && !document.getElementById(buttonId)) {
+        try {
+          await waitForCondition(() => document.querySelector(toolbarSelector));
+        } catch {
+          return;
+        }
+        this._create(), this._renderCacheState(), this.$button.disabled = !1, this._autoCache();
+      }
+    }
+    async _autoCache() {
+      try {
+        await waitForCondition(() => this._isInventoryReady(), {
+          timeout: 1e4
+        });
+      } catch {
+        return this._saveInventory();
+      }
+      if (this._isSaving || this._didSave) return;
+      let items = this._getDomItems();
+      if (!items.length) {
+        await this._saveInventory();
+        return;
+      }
+      let appId = items[0].app || this.appId, cache = InventoryCache.save(this.steamId, appId, items);
+      this.appId = appId, this._renderCacheState(), this._setStatus(`Cached ${formatCount(cache.items.length)}.`), this.$status.title = `Last cached: ${new Date(
+        cache.updatedAt
+      ).toLocaleString()}`;
+    }
+    _isInventoryReady() {
+      if (!document.querySelectorAll(itemSelector).length) return !1;
+      let timeLabel = document.querySelector("#inventory-time-label")?.textContent.trim(), $refresh = document.querySelector("#refresh-inventory");
+      return !!timeLabel || !$refresh?.classList.contains("disabled");
+    }
+    _create() {
+      let $toolbar = document.querySelector(toolbarSelector);
+      this.$button = document.createElement("button"), this.$button.type = "button", this.$button.id = buttonId, this.$button.className = "btn btn-panel bcp-cache-button", this.$button.disabled = !0, this.$button.title = "Save the current backpack inventory for quick listing on stats pages";
+      let $icon = document.createElement("i");
+      $icon.className = "fa fa-database", this.$button.append($icon, " Cache"), this.$status = document.createElement("small"), this.$status.className = "text-muted bcp-cache-status", this.$status.setAttribute("role", "status"), this.$status.setAttribute("aria-live", "polite"), this.$button.addEventListener("click", () => this._saveInventory()), $toolbar.append(this.$button, this.$status);
+    }
+    _renderCacheState() {
+      let cache = InventoryCache.load(this.steamId, this.appId);
+      if (!cache.items.length) {
+        this._setStatus("Not cached."), this.$status.title = "";
+        return;
+      }
+      let savedAt = cache.updatedAt ? new Date(cache.updatedAt).toLocaleString() : "unknown time";
+      this._setStatus(`${formatCount(cache.items.length)} cached`), this.$status.title = `Last cached: ${savedAt}`;
+    }
+    async _saveInventory() {
+      if (!(!this.steamId || this._isSaving)) {
+        this._isSaving = !0, this._didSave = !0, this._setBusy(!0), this._setStatus("Loading backpack\u2026");
+        try {
+          let cache = await InventoryCache.loadBackpack(
+            this.steamId,
+            this.appId
+          );
+          if (this.appId = cache.appId, cache.items.length) {
+            this._renderCacheState();
+            return;
+          }
+          let domItems = this._getDomItems();
+          if (!domItems.length) {
+            this._setStatus("No tradable items found.", !0);
+            return;
+          }
+          let pageCache = InventoryCache.save(
+            this.steamId,
+            domItems[0].app || this.appId,
+            domItems
+          );
+          this.appId = pageCache.appId, this._renderCacheState(), this._setStatus(
+            `Cached ${formatCount(pageCache.items.length)} from the page.`
+          );
+        } catch (error) {
+          console.error("Inventory cache request failed:", error);
+          let items = this._getDomItems();
+          if (!items.length) {
+            this._setStatus(
+              `Could not load backpack: ${error.message}`,
+              !0
+            );
+            return;
+          }
+          let appId = items[0].app || this.appId, cache = InventoryCache.save(this.steamId, appId, items);
+          this.appId = appId, this._renderCacheState(), this._setStatus(
+            `Cached ${formatCount(cache.items.length)} from the page.`
+          );
+        } finally {
+          this._isSaving = !1, this._setBusy(!1);
+        }
+      }
+    }
+    _getDomItems() {
+      let itemsById = /* @__PURE__ */ new Map();
+      return document.querySelectorAll(itemSelector).forEach(($item) => {
+        let data = { ...$item.dataset };
+        if (!isCacheableItem(data)) return;
+        let item = toCacheItem(data);
+        item.id && itemsById.set(item.id, item);
+      }), [...itemsById.values()];
+    }
+    _setBusy(busy) {
+      if (!this.$button) return;
+      this.$button.disabled = busy, this.$button.classList.toggle("disabled", busy), this.$button.setAttribute("aria-busy", String(busy));
+      let $icon = this.$button.querySelector("i");
+      $icon && ($icon.className = busy ? "fa fa-spinner fa-spin" : "fa fa-database");
+    }
+    _setStatus(message, isError = !1) {
+      this.$status && (this.$status.textContent = message, this.$status.classList.toggle("text-danger", isError), this.$status.classList.toggle("text-muted", !isError));
+    }
+  };
+
   // src/pages/myBackpackPage.js
   var myBackpackPage_default = {
     init() {
-      console.log("Loading our backpack page script");
+      injectBackpackPageStyles(), new BackpackCacheButton().init();
+    }
+  };
+
+  // src/features/InventoryCache/QuickList.js
+  var panelId = "bcp-quick-list", bodyId = "bcp-quick-list-body", titleId = "bcp-quick-list-title", hintId = "bcp-quick-list-hint", expandedStorageKey = "stats_quick_list_expanded", tradeLinkStorageKey = "tradelink", listingEndpoint = "/classifieds/listing", amountPattern = "[0-9]*[.,]?[0-9]*", parseAmount = (value) => {
+    let normalized = `${value ?? ""}`.trim().replace(",", ".");
+    if (!normalized) return 0;
+    let amount = Number(normalized);
+    return Number.isFinite(amount) ? amount : Number.NaN;
+  }, parseListingPrice = (value = "") => {
+    let match = `${value}`.match(
+      /(\d+)\s*keys?(?:\s*[,-]?\s*(\d+(?:\.\d+)?)\s*ref)?|(\d+(?:\.\d+)?)\s*ref/i
+    );
+    return {
+      keys: match?.[1] ?? "",
+      metal: match?.[2] ?? match?.[3] ?? ""
+    };
+  }, formatAge = (timestamp) => {
+    if (!timestamp) return "";
+    let minutes = Math.max(0, Math.round((Date.now() - timestamp) / 6e4));
+    if (minutes < 1) return "just now";
+    if (minutes < 60) return `${minutes}m ago`;
+    let hours = Math.round(minutes / 60);
+    return hours < 24 ? `${hours}h ago` : `${Math.round(hours / 24)}d ago`;
+  }, createElement = (tag, className = "", text = "") => {
+    let $element = document.createElement(tag);
+    return className && ($element.className = className), text && ($element.textContent = text), $element;
+  }, QuickList = class {
+    constructor(itemData) {
+      this.itemData = itemData, this.steamId = GlobalUserData.steamID64, this.listingToken = GlobalUserData.listingToken, this.appId = itemData?.app, this.sku = itemData ? skuFromData(itemData) : "", this.cache = null, this.items = [], !(!this.itemData?.name || !this.steamId || !this.appId || !this.sku) && (this._load(), this.items.length && this._render());
+    }
+    _load() {
+      this.cache = InventoryCache.load(this.steamId, this.appId), this.items = InventoryCache.getItemsForSku(this.cache, this.sku);
+    }
+    _render() {
+      let $headerRow = document.querySelector(".stats-header-row");
+      $headerRow && (this.$panel?.remove(), this.$status = null, this.$panel = createElement("section", "bcp-quick-list"), this.$panel.id = panelId, this.$panel.setAttribute("aria-labelledby", titleId), this._renderSellPanel(), $headerRow.append(this.$panel));
+    }
+    _renderSellPanel() {
+      this.$toggle = createElement(
+        "button",
+        "bcp-quick-list-toggle"
+      ), this.$toggle.type = "button", this.$toggle.id = titleId, this.$toggle.setAttribute("aria-expanded", "false"), this.$toggle.setAttribute("aria-controls", bodyId);
+      let $title = createElement("span", "bcp-quick-list-title");
+      $title.append(
+        createElement("i", "fa fa-tag"),
+        " Sell your item"
+      ), this.$headMeta = createElement("span", "bcp-quick-list-head-meta"), this.$caret = createElement(
+        "i",
+        "fa fa-chevron-down bcp-quick-list-caret"
+      ), this.$caret.setAttribute("aria-hidden", "true"), this.$toggle.append($title, this.$headMeta, this.$caret), this.$toggle.addEventListener("click", () => this._toggle()), this.$body = createElement("div", "bcp-quick-list-body"), this.$body.id = bodyId, this.$body.hidden = !0, this.$panel.append(this.$toggle, this.$body), this._setExpanded(
+        !!gmStorage_default.get(expandedStorageKey, !1),
+        !1
+      ), this._renderHeadMeta(), this._renderBody();
+    }
+    _toggle() {
+      this._setExpanded(this.$body.hidden);
+    }
+    _setExpanded(expanded, persist = !0) {
+      this.$body.hidden = !expanded, this.$toggle.setAttribute("aria-expanded", String(expanded)), persist && gmStorage_default.set(expandedStorageKey, expanded);
+    }
+    _renderHeadMeta() {
+      let count = this.items.length, freshness = formatAge(this.cache?.updatedAt);
+      this.$headMeta.textContent = `${count} cached ${count === 1 ? "copy" : "copies"}${freshness ? ` \xB7 ${freshness}` : ""}`;
+    }
+    _renderBody() {
+      this.$body.replaceChildren();
+      let $rows = createElement("div", "bcp-quick-list-rows");
+      this.items.forEach((item) => $rows.append(this._createRow(item)));
+      let $hint = createElement(
+        "p",
+        "help-block",
+        "Enter keys, refined metal, or both. Each copy is published separately."
+      );
+      $hint.id = hintId, this.$status = createElement("p", "bcp-quick-list-status"), this.$status.setAttribute("role", "status"), this.$status.setAttribute("aria-live", "polite"), this.$status.setAttribute("aria-atomic", "true"), this.$body.append($rows, $hint, this.$status);
+    }
+    _createRow(item) {
+      let infoId = `${`bcp-quick-list-row-${item.id}`}-info`, $form = createElement("form", "bcp-quick-list-row");
+      $form.setAttribute("aria-labelledby", infoId);
+      let $info = createElement("div", "bcp-quick-list-row-info");
+      $info.id = infoId;
+      let $idLink = createElement(
+        "a",
+        "bcp-quick-list-item-link",
+        `#${item.id}`
+      );
+      $idLink.href = `https://backpack.tf/item/${encodeURIComponent(item.id)}`, $idLink.target = "_blank", $idLink.rel = "noopener noreferrer", $idLink.title = `Open item #${item.id} on backpack.tf`;
+      let level = item.level ? ` \xB7 Level ${item.level}` : "", effect = item.effect_name ? `${item.effect_name} ` : "";
+      $info.append(
+        $idLink,
+        document.createTextNode(level),
+        document.createTextNode(` \xB7 ${effect}${item.name}`)
+      );
+      let keys = this._createCurrencyField(
+        `${item.id}-keys`,
+        "keys",
+        "Keys"
+      ), metal = this._createCurrencyField(
+        `${item.id}-metal`,
+        "metal",
+        "Ref",
+        "Refined Metal"
+      ), $publish = createElement(
+        "button",
+        "btn btn-primary bcp-quick-list-publish",
+        "Publish"
+      );
+      if ($publish.type = "submit", $publish.title = `Publish listing for #${item.id}`, !!(item.listing_intent || item.listing_price)) {
+        let price = parseListingPrice(item.listing_price);
+        price.keys && (keys.input.value = price.keys), price.metal && (metal.input.value = price.metal), $publish.textContent = "Relist", $publish.title = `Relist copy #${item.id}`, $form.classList.add("is-listed");
+      }
+      let clearValidity = () => {
+        keys.input.setCustomValidity(""), metal.input.setCustomValidity(""), keys.input.removeAttribute("aria-invalid"), metal.input.removeAttribute("aria-invalid"), this._setStatus("");
+      };
+      return keys.input.addEventListener("input", clearValidity), metal.input.addEventListener("input", clearValidity), $form.addEventListener(
+        "submit",
+        (event) => this._handleRowSubmit(
+          event,
+          item,
+          keys.input,
+          metal.input,
+          $form,
+          $publish
+        )
+      ), $form.append($info, keys.group, metal.group, $publish), $form;
+    }
+    _createCurrencyField(idBase, name, addonText, ariaLabel = addonText) {
+      let id = `bcp-quick-list-${idBase}`, $group = createElement(
+        "div",
+        "input-group bcp-quick-list-currency"
+      ), $addon = createElement("span", "input-group-addon", addonText);
+      $addon.title = ariaLabel;
+      let $input = createElement("input", "form-control");
+      return $input.id = id, $input.name = name, $input.type = "text", $input.inputMode = "decimal", $input.setAttribute("inputmode", "decimal"), $input.pattern = amountPattern, $input.autocomplete = "off", $input.spellcheck = !1, $input.placeholder = "0", $input.maxLength = 12, $input.setAttribute("aria-label", ariaLabel), $input.setAttribute("aria-describedby", hintId), $group.append($addon, $input), { group: $group, input: $input };
+    }
+    async _handleRowSubmit(event, item, $keys, $metal, $form, $publish) {
+      event.preventDefault();
+      let keys = parseAmount($keys.value), metal = parseAmount($metal.value);
+      if (!Number.isFinite(keys) || keys < 0) {
+        this._setCustomValidity(
+          $keys,
+          "Enter a valid number of keys."
+        );
+        return;
+      }
+      if (!Number.isFinite(metal) || metal < 0) {
+        this._setCustomValidity(
+          $metal,
+          "Enter a valid refined metal amount."
+        );
+        return;
+      }
+      if (keys <= 0 && metal <= 0) {
+        this._setCustomValidity(
+          $keys,
+          "Enter keys, refined metal, or both."
+        );
+        return;
+      }
+      let tradeLink = this._getTradeLink();
+      if (!tradeLink) {
+        this._setStatus("A Steam trade offer link is required.", !0);
+        return;
+      }
+      if (!this.listingToken) {
+        this._setStatus("Could not read the listing token.", !0);
+        return;
+      }
+      let params = new URLSearchParams({
+        intent: "sell",
+        "currencies[metal]": String(metal || 0),
+        "currencies[keys]": String(keys || 0),
+        promoted: "0",
+        buyout: "0",
+        offers: "1",
+        trade_offer_url: tradeLink,
+        details: "",
+        id: item.id,
+        "user-id": this.listingToken
+      });
+      this._setRowBusy($form, $publish, !0), this._setStatus(`Publishing #${item.id}\u2026`);
+      try {
+        let response = await fetch(listingEndpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded"
+          },
+          body: params
+        });
+        if (!response.ok) {
+          let message = `HTTP ${response.status}`;
+          try {
+            message = (await response.json())?.message ?? message;
+          } catch {
+          }
+          throw new Error(message);
+        }
+        let priceText = [
+          keys > 0 ? `${keys} ${keys === 1 ? "key" : "keys"}` : "",
+          metal > 0 ? `${metal} ref` : ""
+        ].filter(Boolean).join(", "), items = InventoryCache.load(this.steamId, this.appId).items.map(
+          (entry) => entry.id === item.id ? {
+            ...entry,
+            listing_intent: "sell",
+            listing_price: priceText
+          } : entry
+        );
+        if (InventoryCache.save(this.steamId, this.appId, items), this._load(), !this.items.length) {
+          this.$panel?.remove(), this.$panel = null, this.$status = null;
+          return;
+        }
+        this._renderHeadMeta(), this._renderBody(), this._setStatus(`Listing placed for #${item.id}.`, !1);
+      } catch (error) {
+        console.error("Quick listing failed:", error), this._setStatus(
+          `Could not place #${item.id}: ${error.message}`,
+          !0
+        ), this._setRowBusy($form, $publish, !1);
+      }
+    }
+    _setCustomValidity($input, message) {
+      $input.setCustomValidity(message), $input.setAttribute("aria-invalid", "true"), this._setStatus(message, !0), $input.reportValidity(), $input.focus();
+    }
+    _setRowBusy($form, $publish, busy) {
+      $form.setAttribute("aria-busy", String(busy)), $form.querySelectorAll("input, button").forEach(($control) => {
+        $control.disabled = busy;
+      }), $publish.textContent = busy ? "Publishing\u2026" : "Publish";
+    }
+    _getTradeLink() {
+      let stored = gmStorage_default.get(tradeLinkStorageKey, null);
+      if (stored && this._isTradeLink(stored)) return stored;
+      let $ownLink = [
+        ...document.querySelectorAll(".user-link[data-offers-params]")
+      ].find(($link) => $link.dataset.id === this.steamId);
+      if ($ownLink) {
+        let link = `https://steamcommunity.com/tradeoffer/new/${$ownLink.dataset.offersParams}`;
+        return gmStorage_default.set(tradeLinkStorageKey, link), link;
+      }
+      let entered = window.prompt(
+        "Steam trade offer link used for your listings:",
+        stored || "https://steamcommunity.com/tradeoffer/new/?partner=..."
+      );
+      if (!entered) return null;
+      let trimmed = entered.trim();
+      return this._isTradeLink(trimmed) ? (gmStorage_default.set(tradeLinkStorageKey, trimmed), trimmed) : (this._setStatus("Enter a valid Steam trade offer URL.", !0), null);
+    }
+    _isTradeLink(value) {
+      return /^https?:\/\/steamcommunity\.com\/tradeoffer\/new\//i.test(
+        String(value).trim()
+      );
+    }
+    _setStatus(message, isError = !1) {
+      this.$status && (this.$status.textContent = message, this.$status.classList.toggle("text-danger", isError), this.$status.classList.toggle("text-success", !isError && !!message));
     }
   };
 
@@ -2208,10 +2980,10 @@ h5 .bcp-stn-icon {
     lowercase: !!button.lowercase
   }), getCustomButtons = () => {
     let stored = gmStorage_default.get(customButtonsStorageKey, []);
-    return Array.isArray(stored) ? stored.map(normalizeCustomButton).filter((button) => button.link.trim()) : [];
+    return Array.isArray(stored) ? stored.map(normalizeCustomButton).filter((button) => button.link.trim() && isSafeCustomLink(button.link)) : [];
   }, saveCustomButtons = (buttons = []) => gmStorage_default.set(
     customButtonsStorageKey,
-    buttons.map(normalizeCustomButton).filter((button) => button.link.trim())
+    buttons.map(normalizeCustomButton).filter((button) => button.link.trim() && isSafeCustomLink(button.link))
   ), shareParamNames = Object.freeze({
     name: "bcp_name",
     link: "bcp_link",
@@ -2219,7 +2991,7 @@ h5 .bcp-stn-icon {
     strip: "bcp_strip",
     space: "bcp_space",
     lowercase: "bcp_lowercase"
-  }), unsafeLinkPattern = /^\s*(?:javascript|data|vbscript):/i, removeShareParams = (url) => {
+  }), unsafeLinkPattern = /^\s*(?:javascript|data|vbscript|file):/i, unsafeIconPattern = /^\s*(?:javascript|vbscript|file):/i, isSafeCustomLink = (link) => !unsafeLinkPattern.test(String(link ?? "")), removeShareParams = (url) => {
     Object.values(shareParamNames).forEach(
       (param) => url.searchParams.delete(param)
     );
@@ -2249,7 +3021,10 @@ h5 .bcp-stn-icon {
       let separator = link.includes("?") ? "&" : "?";
       return `${link}${separator}ref=eeekwashere`;
     }
-  }, buildCustomLink = (button, itemData) => addReferral(applyCustomTemplate(button.link, itemData, button)), buildCustomName = (button, itemData) => applyCustomTemplate(button.name, itemData, {
+  }, buildCustomLink = (button, itemData) => {
+    let link = applyCustomTemplate(button.link, itemData, button);
+    return isSafeCustomLink(link) ? addReferral(link) : "";
+  }, buildCustomName = (button, itemData) => applyCustomTemplate(button.name, itemData, {
     ...button,
     lowercase: !1
   }).trim() || "Custom button", buildCustomIcon = (button, itemData, resolvedLink) => {
@@ -2257,7 +3032,7 @@ h5 .bcp-stn-icon {
       ...button,
       lowercase: !1
     }).trim();
-    if (icon)
+    if (icon && !unsafeIconPattern.test(icon))
       return /^fa[srb]?\s/.test(icon) || icon.startsWith("fa-") ? {
         iconClass: icon.startsWith("fa-") ? `fa ${icon}` : icon
       } : { iconUrl: icon };
@@ -2498,6 +3273,10 @@ h5 .bcp-stn-icon {
         this._setStatus("Link template is required.", !0), this.$link.focus();
         return;
       }
+      if (!isSafeCustomLink(button.link)) {
+        this._setStatus("This link type is not allowed.", !0), this.$link.focus();
+        return;
+      }
       try {
         await copyText(buildShareUrl(button)), this._setStatus("Share link copied.", !1);
       } catch (error) {
@@ -2508,6 +3287,10 @@ h5 .bcp-stn-icon {
       let button = this._readForm();
       if (!button.link) {
         this._setStatus("Link template is required.", !0), this.$link.focus();
+        return;
+      }
+      if (!isSafeCustomLink(button.link)) {
+        this._setStatus("This link type is not allowed.", !0), this.$link.focus();
         return;
       }
       let nextButtons = this.editingId ? this.buttons.map(
@@ -2884,12 +3667,23 @@ h5 .bcp-stn-icon {
         return [$headers[$headers.length - 1], $statsBody.querySelectorAll(".row")[1]];
       }
     }
-  ], amountHeaderIndex = 2, collapseModulesKey = "stats_modules_collapsed";
+  ], amountHeaderIndex = 2, collapseModulesKey = "stats_modules_collapsed", statsFeatureToggles = [
+    {
+      label: "Sell your item",
+      key: "stats_quick_list_hidden",
+      className: "bcp-hide-quick-list"
+    },
+    {
+      label: "Add button",
+      key: "stats_add_button_hidden",
+      className: "bcp-hide-add-button"
+    }
+  ];
 
   // src/features/StatsModulesController/index.js
   var notHideableModules = ["classifieds", "Suggestions"], StatsModulesController = class {
     constructor({ statsLinks = null } = {}) {
-      this.$statsBody = document.querySelectorAll(".stats-body")[1], this.$statsBody && (this.statsLinks = statsLinks, this.modules = statModules.map((config) => this._resolveModule(config)), this._renderModuleContainers(), this._renderSettings(), this._applyDefaults());
+      this.$statsBody = document.querySelectorAll(".stats-body")[1], this.$statsBody && (this.statsLinks = statsLinks, this.modules = statModules.map((config) => this._resolveModule(config)), this._renderModuleContainers(), this._renderSettings(), this._applyDefaults(), this._applyFeatureToggles());
     }
     _resolveModule(config) {
       let elements = (config.elements?.(this.$statsBody) ?? this._findModuleElements(config.moduleName)).filter(Boolean);
@@ -2959,8 +3753,13 @@ h5 .bcp-stn-icon {
         label: module.moduleName,
         active: !!gmStorage_default.get(module.hideKey, !1),
         payload: module
+      })), featureItems = statsFeatureToggles.map((feature) => ({
+        kind: "feature",
+        label: feature.label,
+        active: !!gmStorage_default.get(feature.key, !1),
+        payload: feature
       })), siteItems = this._getSiteLinkItems(), items = collapseItem ? [collapseItem, { divider: !0 }, ...moduleItems] : moduleItems;
-      return siteItems.length ? [...items, { divider: !0 }, ...siteItems] : items;
+      return featureItems.length && (items.length && items.push({ divider: !0 }), items.push(...featureItems)), siteItems.length ? [...items, { divider: !0 }, ...siteItems] : items;
     }
     /**
      * Hides every module with its title, so the listings are seen at once.
@@ -2983,7 +3782,22 @@ h5 .bcp-stn-icon {
       })) : [];
     }
     _toggleSettingsItem(item) {
-      return item.kind === "collapse" ? this._toggleModulesCollapse() : item.kind === "site" ? this.statsLinks.toggleSite(item.payload.siteName) : this._toggleModuleVisibility(item.payload);
+      if (item.kind === "collapse") return this._toggleModulesCollapse();
+      if (item.kind === "site")
+        return this.statsLinks.toggleSite(item.payload.siteName);
+      if (item.kind === "feature") {
+        let hidden = gmStorage_default.toggle(item.payload.key, !1);
+        return document.body.classList.toggle(item.payload.className, hidden), hidden;
+      }
+      return this._toggleModuleVisibility(item.payload);
+    }
+    _applyFeatureToggles() {
+      statsFeatureToggles.forEach((feature) => {
+        document.body.classList.toggle(
+          feature.className,
+          !!gmStorage_default.get(feature.key, !1)
+        );
+      });
     }
     _toggleModuleVisibility(module) {
       let hidden = gmStorage_default.toggle(module.hideKey, !1);
@@ -3113,7 +3927,7 @@ h5 .bcp-stn-icon {
     init() {
       injectStatsPageStyles();
       let statsLinks = new StatsLinks();
-      new StatsQuickLinks(), new StatsModulesController({ statsLinks }), initClassifiedsSection(statsLinks.itemData).catch(
+      new StatsQuickLinks(), new QuickList(statsLinks.itemData), new StatsModulesController({ statsLinks }), initClassifiedsSection(statsLinks.itemData).catch(
         (error) => console.error("Failed to init the classifieds section:", error)
       );
     }
@@ -3137,13 +3951,6 @@ h5 .bcp-stn-icon {
     defaultPage: defaultPage_default
   };
 
-  // src/global/index.js
-  var GlobalUserData = class {
-    static get steamID64() {
-      return document.querySelector(".username a")?.href.split("/").at(-1) ?? null;
-    }
-  };
-
   // src/utils/getCurrentPageID.js
   function getCurrentPageID() {
     let location = window.location.href, ownProfile = GlobalUserData.steamID64 ? "profiles/" + GlobalUserData.steamID64 : null;
@@ -3152,7 +3959,7 @@ h5 .bcp-stn-icon {
 
   // src/utils/removeAdOnCurrentPage.js
   function removeAdOnCurrentPage() {
-    document.querySelector("#media-topbox").closest(".panel").remove();
+    document.querySelector("#media-topbox")?.closest(".panel")?.remove();
   }
 
   // src/router/index.js
