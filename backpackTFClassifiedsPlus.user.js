@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         backpackTFClassifieds+
 // @namespace    https://steamcommunity.com/profiles/76561198967088046
-// @version      2.0.1
-// @description  Rethinks backpack interface. Well, how I, eeek, rethink it, and hopefully yall like it 
+// @version      2.2
+// @description  very cool stuff for very cool people 
 // @author       eeek
 // @match        https://backpack.tf/classifieds?*
 // @match        https://backpack.tf/stats/*
@@ -12,6 +12,8 @@
 // @downloadURL https://github.com/yaboieeek/backpackTFClassifiedsPlus/raw/refs/heads/main/backpackTFClassifiedsPlus.user.js
 // @grant        GM_getValue
 // @grant        GM_setValue
+// @grant        GM_xmlhttpRequest
+// @connect      stntrading.eu
 // ==/UserScript==
 
 (() => {
@@ -143,7 +145,7 @@
       hiddenClass: "strange-hidden",
       highlightColor: "rgba(255,165,0, .15)"
     }
-  }, blockedListingHighlight = "rgba(0,0,0,.1)", blockedListingHiddenClass = "blocked-listing", ListingAgeGroup = Object.freeze({
+  }, blockedListingHighlight = "rgba(0,0,0,.1)", blockedListingHiddenClass = "blocked-listing", compactListingClass = "compact-listing", compactListingDeviantClass = "compact-listing-deviant", compactPriceClass = "bcp-compact-price", compactPriceListingClass = "has-compact-price", fullCurrencyListingClass = "full-currency", keysOnlyPriceListingClass = "keys-only-price", ListingAgeGroup = Object.freeze({
     FRESH: "fresh",
     AGING: "aging",
     OLD: "old"
@@ -162,7 +164,7 @@
         <div class="panel-heading">Listings control</div>
         <div class="panel-body padded"></div>
     </div>
-`, hideColors = { off: "#628c2a", on: "#c84b43" }, enableColors = { off: "#59636a", on: "#278094" }, listingFilters = [
+`, collapsedKey = "stats_listings_control_collapsed", hideColors = { off: "#628c2a", on: "#c84b43" }, enableColors = { off: "#59636a", on: "#278094" }, listingFilters = [
     {
       key: "mp_listings",
       label: "Marketplace",
@@ -199,6 +201,20 @@
       label: "Truncate",
       colors: enableColors,
       apply: (listing) => listing.truncateTheListing()
+    },
+    {
+      key: "compact_listings",
+      label: "Compact view",
+      colors: enableColors,
+      defaultValue: !0,
+      apply: (listing, enabled) => listing.setCompactMode(enabled)
+    },
+    {
+      key: "full_currency",
+      label: "Full currency",
+      colors: enableColors,
+      defaultValue: !0,
+      apply: (listing, enabled) => listing.setFullCurrency(enabled)
     },
     {
       key: "plain_nicknames",
@@ -255,15 +271,18 @@
       getState = () => !1,
       getCount = () => 0,
       onToggle = () => !1,
+      getCollapsed = () => !1,
+      onToggleCollapsed = () => !1,
       $anchor = null,
-      withPanel = !0
+      withPanel = !0,
+      withToggler = !1
     } = {}) {
-      this.buttons = buttons, this.getState = getState, this.getCount = getCount, this.onToggle = onToggle, this.$anchor = $anchor ?? document.querySelector(panelAnchorSelector), this.withPanel = withPanel, this._create();
+      this.buttons = buttons, this.getState = getState, this.getCount = getCount, this.onToggle = onToggle, this.getCollapsed = getCollapsed, this.onToggleCollapsed = onToggleCollapsed, this.$anchor = $anchor ?? document.querySelector(panelAnchorSelector), this.withPanel = withPanel, this.withToggler = withToggler, this._create();
     }
     _create() {
       if (!this.$anchor) return;
-      let $host = this.withPanel ? this._createPanelHost() : document.createElement("div");
-      ($host.querySelector(".panel-body") ?? $host).append(this._createControls()), this.$anchor.after($host);
+      let $host = this.withPanel ? this._createPanelHost() : document.createElement("div"), $buttonsTarget = $host.querySelector(".panel-body") ?? $host;
+      this.$controls = this._createControls(), $buttonsTarget.append(this.$controls), this.$anchor.after($host), this.withToggler && this._renderToggler();
     }
     _createPanelHost() {
       let $row = document.createElement("div");
@@ -283,6 +302,18 @@
         );
       }), $container;
     }
+    /**
+     * Small button on the far side of the heading row (stats page):
+     * hides the buttons, so the listings are seen at once, and brings them back.
+     */
+    _renderToggler() {
+      this.$anchor.classList.add("listings-control-heading"), this.$toggle = document.createElement("button"), this.$toggle.type = "button", this.$toggle.className = "listings-control-toggle", this.$toggle.dataset.tip = "top", this.$toggleIcon = document.createElement("i"), this.$toggle.append(this.$toggleIcon), this.$toggle.addEventListener("click", (event) => {
+        event.preventDefault(), event.stopPropagation(), this._setCollapsed(this.onToggleCollapsed());
+      }), this.$anchor.append(this.$toggle), this._setCollapsed(this.getCollapsed());
+    }
+    _setCollapsed(collapsed) {
+      this.$controls.classList.toggle("hidden", collapsed), this.$toggleIcon.className = collapsed ? "fa fa-fw fa-eye" : "fa fa-fw fa-eye-slash", this.$toggle.title = collapsed ? "Show listings control" : "Hide listings control", this.$toggle.setAttribute("aria-expanded", String(!collapsed));
+    }
   };
 
   // src/features/ListingsControl/index.js
@@ -299,6 +330,8 @@
         getState: (filter) => this.isEnabled(filter),
         getCount: (filter) => this.countHiddenListings(filter),
         onToggle: (filter) => this.toggle(filter),
+        getCollapsed: () => this.isCollapsed(),
+        onToggleCollapsed: () => this.toggleCollapsed(),
         ...ui
       }), this._applyState();
     }
@@ -314,6 +347,16 @@
     toggle(filter) {
       let enabled = gmStorage_default.toggle(filter.key, filter.defaultValue ?? !1);
       return this._apply(filter, enabled), enabled;
+    }
+    /**
+     * Whether the buttons are folded away (stats page only: the toggler
+     * on the classifieds heading switches it, the classifieds panel is always open).
+     */
+    isCollapsed() {
+      return !!gmStorage_default.get(collapsedKey, !1);
+    }
+    toggleCollapsed() {
+      return gmStorage_default.toggle(collapsedKey, !1);
     }
     _applyState() {
       this.filters.forEach((filter) => {
@@ -401,9 +444,16 @@
   }
 
   // src/features/UI/listing/index.js
-  var sellerNameStylePattern = /^(?:awesome\d+|xmas|premium)$/, ListingUI = class {
+  var sellerNameStylePattern = /^(?:awesome\d+|xmas|premium)$/, intentIconReplacements = {
+    "fa-arrow-left": "fa-angle-left",
+    "fa-arrow-right": "fa-angle-right"
+  };
+  function getCurrencyRank(pricePart) {
+    return /keys?/i.test(pricePart) ? 0 : /ref/i.test(pricePart) ? 1 : 2;
+  }
+  var ListingUI = class {
     constructor(listing) {
-      this.listing = listing, this.type = defineListingType(listing.data), this.blocked = BlockedUsers.isBlocked(this.userId), this.sellerNameStyleClass = this._findSellerNameStyleClass(), this._render();
+      this.listing = listing, this.type = defineListingType(listing.data), this.blocked = BlockedUsers.isBlocked(this.userId), this.isDeviantItem = !1, this.sellerNameStyleClass = this._findSellerNameStyleClass(), this._render();
     }
     get $e() {
       return this.listing.$e;
@@ -416,6 +466,30 @@
     }
     get meta() {
       return listingTypeMeta[this.type] ?? listingTypeMeta[ListingType.DEFAULT];
+    }
+    /**
+     * Listings of the same item share its definition, quality and effect.
+     * Page specific bits (offers url, promotion, ...) must not split the group.
+     */
+    get groupKey() {
+      let {
+        app = "",
+        defindex = "",
+        quality = "",
+        effect_id = ""
+      } = this.listing.data;
+      return [app, defindex, quality, effect_id].join("|");
+    }
+    /**
+     * The whole price split by currency: `["20 keys", "30 ref"]`.
+     * The site's tag shows a converted number instead of the real listing price.
+     */
+    get priceParts() {
+      let {
+        listing_price: listingPrice = "",
+        p_bptf: marketPrice = ""
+      } = this.listing.data;
+      return (listingPrice || marketPrice).split(/,\s+/).map((pricePart) => pricePart.trim()).filter(Boolean).sort((a, b) => getCurrencyRank(a) - getCurrencyRank(b));
     }
     truncateTheListing() {
       this.$e.querySelector("p")?.classList.toggle("truncated");
@@ -433,6 +507,23 @@
       this.$e.classList.toggle(blockedListingHiddenClass);
     }
     /**
+     * Compact view: icon, price, name, trade offer, date and seller.
+     * A deviant item keeps the accent, so the main listings stay quiet.
+     */
+    setCompactMode(enabled) {
+      this.$e.classList.toggle(compactListingClass, enabled), this.$e.classList.toggle(
+        compactListingDeviantClass,
+        enabled && this.isDeviantItem
+      );
+    }
+    /**
+     * Swaps the rounded site price ("20.46 keys") for the whole currency
+     * ("20 keys" over "30 ref") on the compact rows.
+     */
+    setFullCurrency(enabled) {
+      this.$e.classList.toggle(fullCurrencyListingClass, enabled);
+    }
+    /**
      * Removes/restores the `awesomeN` class that gives the seller nickname its custom look.
      */
     toggleSellerNameStyle() {
@@ -448,7 +539,21 @@
       );
     }
     _render() {
-      this._rewriteDateCaptions(), this._removeOnlineIndicator(), this.ageHighlightClass = this._findAgeHighlightClass(), this._makeStrangeNameClickable(), this._highlight(), this._renderBlockButton(), this._bindTruncation();
+      this._rewriteDateCaptions(), this._removeOnlineIndicator(), this._replaceIntentIcons(), this.ageHighlightClass = this._findAgeHighlightClass(), this._makeStrangeNameClickable(), this._highlight(), this._renderBlockButton(), this._renderCompactPrice(), this._bindTruncation();
+    }
+    /**
+     * A compact row shows the price currency by currency, so keys and refined
+     * keep their own line and the numbers stay aligned.
+     */
+    _renderCompactPrice() {
+      if (this.$e.classList.contains(keysOnlyPriceListingClass)) return;
+      let priceParts = this.priceParts, $listingItem = this.$e.querySelector(".listing-item");
+      if (!priceParts.length || !$listingItem) return;
+      let $price = document.createElement("span");
+      $price.className = compactPriceClass, priceParts.forEach((pricePart) => {
+        let $row = document.createElement("span");
+        $row.className = `${compactPriceClass}-row`, $row.textContent = pricePart, $price.append($row);
+      }), this.$e.classList.add(compactPriceListingClass), $listingItem.append($price);
     }
     /**
      * Both dates of the listing ("Bumped" and "Listed").
@@ -505,6 +610,18 @@
         ($dot) => $dot.remove()
       );
     }
+    /**
+     * Both intent variants (buying and selling) get the same angle arrow.
+     */
+    _replaceIntentIcons() {
+      this.$e.querySelectorAll(
+        ".listing-title i, .listing-intent-buy, .listing-intent-sell"
+      ).forEach(
+        ($icon) => Object.entries(intentIconReplacements).forEach(([from, to]) => {
+          $icon.classList.contains(from) && ($icon.classList.remove(from), $icon.classList.add(to));
+        })
+      );
+    }
     _findSellerNameStyleClass() {
       return (this.$e.querySelector(".user-handle .user-link")?.className ?? "").split(/\s+/).find((token) => sellerNameStylePattern.test(token)) ?? null;
     }
@@ -548,7 +665,17 @@
   // src/features/ListingsController/index.js
   var ListingsController = class {
     constructor(listings = Store.listings) {
-      this.listings = listings.map((listing) => new ListingUI(listing));
+      this.listings = listings.map((listing) => new ListingUI(listing)), this._markDeviantItems();
+    }
+    /**
+     * The item of the first listing is the main one of the page, so listings of
+     * the same item stay quiet and the deviant ones are highlighted.
+     */
+    _markDeviantItems() {
+      let mainGroupKey = this.listings[0]?.groupKey;
+      this.listings.forEach((listing) => {
+        listing.isDeviantItem = listing.groupKey !== mainGroupKey;
+      });
     }
   };
 
@@ -622,7 +749,7 @@
 .spell-hidden,
 .strange-hidden,
 .blocked-hidden {
-    display: none;
+    display: none !important;
 }
 
 h2 {
@@ -678,6 +805,37 @@ footer {
     margin-bottom: 3rem;
 }
 
+/* stats page: the heading row carries a small toggler on its far side */
+.listings-control-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    column-gap: 1rem;
+}
+
+.listings-control-toggle {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid #bbb;
+    border-radius: 0.5em;
+    background: #f7f7f7;
+    color: #555;
+    font-size: 12px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.listings-control-toggle:hover {
+    background: #eee;
+    color: #333;
+}
+
 .toggle-control-button {
     position: relative;
 }
@@ -714,6 +872,314 @@ footer {
     display: inline;
 }
 
+/*
+ * Compact view: one row per listing - icon, price, item name, trade offer and
+ * the date with the seller under it. Class-only styling, so the toggle restores
+ * the original listing without any markup changes.
+ */
+li.listing.compact-listing {
+    --bcp-compact-icon-size: 36px;
+    --bcp-compact-price-width: 78px;
+    display: flex;
+    flex: 1 1 100%;
+    grid-column: 1 / -1;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.6em;
+    width: auto !important;
+    max-width: none !important;
+    min-height: 0 !important;
+    height: auto !important;
+    margin: 2px 0 !important;
+    padding: 4px 8px !important;
+    float: none !important;
+    clear: both !important;
+    box-sizing: border-box;
+    border: 1px solid rgba(0, 0, 0, 0.07) !important;
+    border-left: 3px solid rgba(89, 99, 106, 0.35) !important;
+    border-radius: 4px !important;
+    background-color: rgba(0, 0, 0, 0.03);
+    transition: background-color 0.15s ease;
+}
+
+li.listing.compact-listing:hover {
+    background-color: rgba(0, 0, 0, 0.08);
+}
+
+/* the item that differs from the main one of the page gets the accent */
+li.listing.compact-listing.compact-listing-deviant {
+    border-left-color: #c9a227 !important;
+    background-color: rgba(201, 162, 39, 0.12);
+}
+
+li.listing.compact-listing.compact-listing-deviant:hover {
+    background-color: rgba(201, 162, 39, 0.2);
+}
+
+.compact-listing.compact-listing-deviant .listing-title h5 {
+    color: #8a6d1f;
+}
+
+/* the icon block loses its size: the icon and the price chip stay side by side */
+.compact-listing > .listing-item {
+    display: flex;
+    align-items: center;
+    flex: 0 0 auto;
+    gap: 0.35em;
+    width: auto !important;
+    height: auto !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    float: none !important;
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+}
+
+/* the item keeps its positioning, because the paint bar hangs off it */
+.compact-listing > .listing-item > .item {
+    display: flex;
+    align-items: center;
+    flex: 0 0 auto;
+    gap: 0.35em;
+    width: auto !important;
+    height: auto !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    float: none !important;
+    position: relative !important;
+    border-radius: 2px !important;
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+}
+
+/* both background layers of the icon (item + particle) scale together */
+.compact-listing .item-icon {
+    flex: 0 0 auto;
+    width: var(--bcp-compact-icon-size);
+    height: var(--bcp-compact-icon-size);
+    border-radius: 2px !important;
+    background-position: center, center !important;
+    background-repeat: no-repeat, no-repeat !important;
+    /* the particle sprite is a round glow - zoom it so it fills the square icon */
+    background-size: contain, 160% 160% !important;
+}
+
+/* the paint bar keeps hugging the bottom edge of the icon */
+.compact-listing .paint {
+    position: absolute !important;
+    top: auto !important;
+    right: auto !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    width: var(--bcp-compact-icon-size) !important;
+    height: 4px !important;
+    margin: 0 !important;
+    border-radius: 0 0 3px 3px;
+}
+
+.compact-listing .icon-stack {
+    display: none !important;
+}
+
+/* the effect is already a part of the item name */
+.compact-listing .tag.top-left {
+    display: none !important;
+}
+
+/* the price column keeps one width, so the rows under it never shift */
+.compact-listing .tag.bottom-right {
+    position: static !important;
+    top: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    left: auto !important;
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.25em;
+    width: var(--bcp-compact-price-width) !important;
+    box-sizing: border-box;
+    margin: 0 !important;
+    padding: 2px 6px !important;
+    font-size: 11px !important;
+    font-weight: 600;
+    line-height: 1.4;
+    white-space: nowrap;
+    overflow: hidden;
+    border: 0 !important;
+    border-radius: 3px !important;
+    background-color: rgba(0, 0, 0, 0.08) !important;
+    color: inherit !important;
+    opacity: 1 !important;
+}
+
+/* the tag glyph would eat the room the fixed price column needs */
+.compact-listing .tag.bottom-right .fa {
+    display: none !important;
+}
+
+/*
+ * The tag rounds the price to one converted number ("20.46 keys"), so the
+ * "Full currency" toggle swaps it for the real keys and refined rows.
+ */
+.compact-listing.full-currency.has-compact-price .tag.bottom-right {
+    display: none !important;
+}
+
+.bcp-compact-price {
+    display: none;
+}
+
+.compact-listing.full-currency .bcp-compact-price {
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 1px;
+    width: var(--bcp-compact-price-width);
+    box-sizing: border-box;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background-color: rgba(0, 0, 0, 0.08);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.4;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.compact-listing .bcp-compact-price-row {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* the name goes first, the date with the seller sits under it */
+.compact-listing > .listing-body {
+    display: flex !important;
+    flex: 1 1 auto;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: center;
+    gap: 2px;
+    width: auto !important;
+    min-width: 0;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+}
+
+.compact-listing .listing-header {
+    display: flex !important;
+    flex: 1 1 auto;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5em;
+    min-width: 0;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+}
+
+.compact-listing .listing-title {
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    gap: 0.35em;
+    min-width: 0;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+.compact-listing .listing-title h5 {
+    min-width: 0;
+    margin: 0 !important;
+    padding: 0 !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    line-height: 1.4 !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+}
+
+/* the intent arrow stays next to the first line of the name */
+.compact-listing .listing-intent-buy,
+.compact-listing .listing-intent-sell {
+    align-self: flex-start;
+    margin-top: 2px;
+    font-size: 12px;
+    opacity: 0.75;
+}
+
+/* trade offers are the point of a listing - the report button and the message are not */
+.compact-listing .quote-box {
+    display: none !important;
+}
+
+.compact-listing .listing-buttons {
+    display: flex !important;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 4px;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+}
+
+.compact-listing .listing-buttons > :not(a[href*="tradeoffer"]) {
+    display: none !important;
+}
+
+/* the trade buttons follow the flat look of the compact row */
+.compact-listing .listing-buttons a[href*="tradeoffer"] {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 1px solid rgba(0, 0, 0, 0.12) !important;
+    border-radius: 3px !important;
+    background: rgba(0, 0, 0, 0.04) !important;
+    color: inherit !important;
+    font-size: 11px;
+    line-height: 1;
+    box-shadow: none !important;
+    text-shadow: none !important;
+    opacity: 0.7;
+    transition: opacity 0.15s ease, background-color 0.15s ease;
+}
+
+.compact-listing .listing-buttons a[href*="tradeoffer"]:hover {
+    background: rgba(89, 99, 106, 0.2) !important;
+    color: inherit !important;
+    opacity: 1;
+}
+
+/* the date and the seller are fully readable under the name */
+.compact-listing > .listing-body > .click-data-toggle {
+    flex: 0 0 auto;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 0.6em;
+    margin: 0 !important;
+    font-size: 11px;
+}
+
+.compact-listing > .listing-body > .click-data-toggle time {
+    font-size: 11px !important;
+}
+
 /* dates on the left, nickname on the right */
 .click-data-toggle,
 .listing .click-data-toggle {
@@ -735,7 +1201,7 @@ footer {
 }
 
 .blocked-listing {
-    display: none;
+    display: none !important;
 }
 
 .listing-age-fresh,
@@ -848,6 +1314,50 @@ footer {
         );
         border-radius: 0.5em;
     }
+}
+
+/* STN.tf orders use the native listing styling; only the description is adjusted */
+.quote-box p.bcp-stn-description.truncated {
+    width: auto;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+}
+
+/* source marker next to the item name */
+h5 .bcp-stn-icon {
+    width: 14px;
+    height: 14px;
+    margin-left: 4px;
+    border-radius: 3px;
+    object-fit: contain;
+    vertical-align: -2px;
+}
+
+/* the compact row hides every button but trade offers, the STN link has to stay */
+.compact-listing .listing-buttons > a.bcp-stn-link {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 1px solid rgba(0, 0, 0, 0.12) !important;
+    border-radius: 3px !important;
+    background: rgba(0, 0, 0, 0.04) !important;
+    color: inherit !important;
+    font-size: 11px;
+    line-height: 1;
+    box-shadow: none !important;
+    text-shadow: none !important;
+    opacity: 0.7;
+}
+
+.compact-listing .listing-buttons > a.bcp-stn-link:hover {
+    background: rgba(89, 99, 106, 0.2) !important;
+    color: inherit !important;
+    opacity: 1;
 }
 `;
 
@@ -1049,6 +1559,282 @@ footer {
 .stats-quick-links:not(.is-disabled) .stats-quick-links-toggle {
     display: flex;
 }
+
+/* semi-transparent dashed trigger for the custom-button builder */
+.price-box.bcp-add-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
+    height: 50px;
+    padding: 6px 9px;
+    box-sizing: border-box;
+    border: 1px dashed rgba(0, 0, 0, 0.28) !important;
+    border-radius: 4px !important;
+    background: rgba(255, 255, 255, 0.35) !important;
+    box-shadow: none !important;
+    color: #777 !important;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none !important;
+    opacity: 0.55;
+    cursor: pointer;
+    transition: opacity 0.15s ease, background-color 0.15s ease,
+        border-color 0.15s ease;
+}
+
+.price-box.bcp-add-button:hover,
+.price-box.bcp-add-button:focus {
+    opacity: 1;
+    border-color: rgba(0, 0, 0, 0.4) !important;
+    background: #f7f7f7 !important;
+    color: #333 !important;
+    outline: none;
+}
+
+.bcp-add-button .fa {
+    font-size: 16px;
+}
+
+.bcp-add-button-text {
+    line-height: 1;
+}
+
+.price-box.bcp-custom-site .subtitle {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.bcp-custom-buttons-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 3000;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 4vh 1rem;
+    overflow-y: auto;
+    background: rgba(0, 0, 0, 0.6);
+}
+
+.bcp-custom-buttons-panel {
+    width: min(780px, 100%);
+    margin: 0;
+    border: 1px solid #b8b8b8;
+    border-radius: 6px;
+    background: #fff;
+    box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
+    overflow: hidden;
+}
+
+.bcp-custom-buttons-panel .bcp-custom-buttons-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 15px;
+    border: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+    background: #374c5b;
+    color: #fff !important;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.bcp-custom-buttons-panel .bcp-custom-buttons-body {
+    max-height: 70vh;
+    padding: 16px 18px 4px;
+    border: 0;
+    background: #fff;
+    overflow-y: auto;
+}
+
+.bcp-custom-buttons-panel .bcp-custom-buttons-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 10px 15px;
+    border-top: 1px solid #d8d8d8;
+    background: #f4f4f4;
+}
+
+.bcp-custom-buttons-panel .form-group {
+    margin-bottom: 14px;
+}
+
+.bcp-custom-buttons-panel label {
+    display: block;
+    margin-bottom: 4px;
+    font-weight: 600;
+}
+
+.bcp-custom-buttons-panel .help-block {
+    margin: 4px 0 0;
+    color: #888;
+    font-size: 11px;
+}
+
+.bcp-custom-buttons-panel .form-control {
+    height: 31px;
+    padding: 5px 8px;
+    border: 1px solid #c8c8c8;
+    border-radius: 3px;
+    background: #fff;
+    color: #333;
+    font-size: 12px;
+    box-shadow: none;
+}
+
+.bcp-custom-buttons-panel .form-control:focus {
+    border-color: #66afe9;
+    outline: 0;
+    box-shadow: 0 0 3px rgba(102, 175, 233, 0.45);
+}
+
+.bcp-custom-buttons-panel .btn {
+    display: inline-block;
+    vertical-align: middle;
+}
+
+.bcp-custom-buttons-close {
+    padding: 0 2px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font-size: 16px;
+    line-height: 1;
+    opacity: 0.65;
+    cursor: pointer;
+}
+
+.bcp-custom-buttons-close:hover {
+    opacity: 1;
+}
+
+.bcp-custom-list {
+    max-height: 190px;
+    margin-bottom: 12px;
+    padding: 2px;
+    border: 1px solid #e2e2e2;
+    border-radius: 4px;
+    background: #fafafa;
+    overflow-y: auto;
+}
+
+.bcp-custom-buttons-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px;
+    border-bottom: 1px solid #eee;
+}
+
+.bcp-custom-buttons-row:last-child {
+    border-bottom: 0;
+}
+
+.bcp-custom-buttons-row-preview {
+    flex: 0 0 200px;
+    margin-bottom: 0;
+    pointer-events: none;
+}
+
+.bcp-custom-buttons-row-preview .price-box {
+    width: 200px;
+    margin: 0;
+    box-sizing: border-box;
+}
+
+.bcp-custom-buttons-row-info {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.bcp-custom-buttons-row-name {
+    overflow: hidden;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.bcp-custom-buttons-row-template {
+    overflow: hidden;
+    color: #888;
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.bcp-custom-buttons-row-actions {
+    flex: 0 0 auto;
+    display: flex;
+    gap: 4px;
+}
+
+.bcp-custom-buttons-variables {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 3px;
+    max-height: 90px;
+    margin-top: 6px;
+    padding: 4px;
+    border: 1px dashed #d8d8d8;
+    border-radius: 4px;
+    background: #fafafa;
+    overflow-y: auto;
+}
+
+.bcp-custom-buttons-variables-label {
+    margin-right: 2px;
+    color: #888;
+    font-size: 11px;
+}
+
+.bcp-custom-variable {
+    font-family: monospace;
+}
+
+.bcp-custom-buttons-presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 4px;
+}
+
+.bcp-custom-buttons-preview {
+    display: flex;
+    align-items: center;
+    min-height: 58px;
+    margin-bottom: 0;
+    padding: 8px;
+    border: 1px dashed #d8d8d8;
+    border-radius: 4px;
+    background: #fafafa;
+    pointer-events: none;
+}
+
+.bcp-custom-buttons-preview .price-box {
+    width: 200px;
+    margin: 0;
+    box-sizing: border-box;
+}
+
+.bcp-custom-buttons-preview-url {
+    margin-top: 5px;
+    color: #888;
+    font-size: 11px;
+    word-break: break-all;
+}
+
+.bcp-custom-buttons-status {
+    margin-right: auto;
+    font-size: 12px;
+}
 `;
 
   // src/styles/index.js
@@ -1108,6 +1894,526 @@ footer {
   var myBackpackPage_default = {
     init() {
       console.log("Loading our backpack page script");
+    }
+  };
+
+  // src/features/StnListings/requestText.js
+  var requestWithGm = (url) => new Promise((resolve, reject) => {
+    GM_xmlhttpRequest({
+      method: "GET",
+      url,
+      timeout: 8e3,
+      onload: (response) => {
+        if (response.status < 200 || response.status >= 300) {
+          reject(new Error(`Request failed with ${response.status}`));
+          return;
+        }
+        resolve(response.responseText ?? "");
+      },
+      onerror: () => reject(new Error("Request failed")),
+      ontimeout: () => reject(new Error("Request timed out"))
+    });
+  });
+  async function requestText(url) {
+    if (typeof GM_xmlhttpRequest == "function") return requestWithGm(url);
+    let response = await fetch(url);
+    if (!response.ok) throw new Error(`Request failed with ${response.status}`);
+    return response.text();
+  }
+
+  // src/features/StnListings/parseItemPage.js
+  var challengeTitlePattern = /captcha|one more step|just a moment|attention required/i, findLabelValue = (doc, label) => {
+    let $value = [...doc.querySelectorAll("p")].find(
+      ($p) => $p.textContent.trim().toLowerCase().startsWith(label)
+    )?.nextElementSibling;
+    return ($value?.querySelector("b")?.textContent.trim() ?? $value?.textContent.trim()) || null;
+  }, parseInteger = (value) => {
+    let match = `${value ?? ""}`.match(/\d+/);
+    return match ? Number.parseInt(match[0], 10) : null;
+  }, findStock = (doc) => {
+    let stockText = [...doc.querySelectorAll("p")].map(($p) => $p.textContent.trim()).find((text) => /in stock/i.test(text));
+    return parseInteger(stockText) ?? 0;
+  };
+  function parseItemPage(doc) {
+    if (challengeTitlePattern.test(doc.title)) return null;
+    let stnPays = findLabelValue(doc, "sell it for"), stnCharges = findLabelValue(doc, "buy it for");
+    if (!stnPays && !stnCharges) return null;
+    let $limit = doc.querySelector("b[data-stock-limit]"), buyLimit = parseInteger(
+      $limit?.getAttribute("data-stock-limit") ?? $limit?.textContent
+    ) ?? 0, stock = findStock(doc);
+    return {
+      buyOrderPrice: buyLimit > 0 ? stnPays : null,
+      sellOrderPrice: stock > 0 ? stnCharges : null,
+      buyLimit,
+      stock
+    };
+  }
+
+  // src/features/StnListings/const.js
+  var stnSiteName = "STN.tf", stnAccountId = "stn-trading", stnItemBaseUrl = "https://stntrading.eu/item/tf2/Unusual+", stnIconUrl = "https://stntrading.eu/assets/img/logos/icon.svg", stnListingClass = "bcp-stn-listing", stnLinkClass = "bcp-stn-link", stnDescriptionClass = "bcp-stn-description", stnIconClass = "bcp-stn-icon", toUrlPart = (value = "") => encodeURIComponent(value).replace(/%20/g, "+"), buildStnItemUrl = ({ effect_name = "", name = "" }) => stnItemBaseUrl + [effect_name, name].filter(Boolean).map(toUrlPart).join("+");
+
+  // src/features/StnListings/listingMarkup.js
+  var intentMeta = {
+    buy: {
+      iconClass: "fa fa-arrow-left listing-intent-buy",
+      action: "Sell this item to STN.tf"
+    },
+    sell: {
+      iconClass: "fa fa-arrow-right listing-intent-sell",
+      action: "Buy this item from STN.tf"
+    }
+  }, createExternalLink = ({ href, title, className, iconClass }) => {
+    let $link = document.createElement("a");
+    $link.className = className, $link.href = href, $link.target = "_blank", $link.rel = "noopener noreferrer", $link.title = title;
+    let $icon = document.createElement("i");
+    return $icon.className = iconClass, $link.append($icon), $link;
+  }, createDateLine = ({ url }) => {
+    let now = /* @__PURE__ */ new Date(), nowIso = now.toISOString(), nowTitle = now.toUTCString(), $dateLine = document.createElement("span");
+    $dateLine.className = "text-muted click-data-toggle", ["data1", "data2"].forEach((className) => {
+      let label = className === "data1" ? "Bumped" : "Listed", $part = document.createElement("span");
+      $part.className = className;
+      let $time = document.createElement("time");
+      $time.dateTime = nowIso, $time.title = nowTitle, $time.textContent = "just now", $part.append(`${label} `, $time), $dateLine.append($part, " ");
+    }), $dateLine.append("by ");
+    let $userHandle = document.createElement("span");
+    $userHandle.className = "user-handle";
+    let $userLink = document.createElement("a");
+    return $userLink.className = "user-link", $userLink.href = url, $userLink.target = "_blank", $userLink.rel = "noopener noreferrer", $userLink.dataset.name = stnSiteName, $userLink.dataset.id = stnAccountId, $userLink.textContent = stnSiteName, $userHandle.append($userLink), $dateLine.append($userHandle), $dateLine;
+  }, createItemElement = ($itemTemplate, { price, compactPrice, intent, url, description }) => {
+    let $item = $itemTemplate.cloneNode(!0);
+    $item.setAttribute("data-listing_account_id", stnAccountId), $item.setAttribute("data-listing_name", stnSiteName), $item.setAttribute("data-listing_intent", intent), $item.setAttribute("data-listing_comment", description), $item.setAttribute("data-listing_offers_url", url), $item.setAttribute("data-listing_price", price);
+    let $tag = $item.querySelector(".tag.bottom-right");
+    if (!$tag) {
+      $tag = document.createElement("div"), $tag.className = "tag bottom-right";
+      let $tagIcon = document.createElement("i");
+      $tagIcon.className = "fa fa-tag", $tag.append($tagIcon, " "), $item.append($tag);
+    }
+    let $tagValue = $tag.querySelector("span");
+    return $tagValue || ($tagValue = document.createElement("span"), $tag.append($tagValue)), $tagValue.textContent = compactPrice, $item;
+  }, createQuoteBox = (description) => {
+    let $quoteBox = document.createElement("div");
+    $quoteBox.className = "quote-box";
+    let $leftQuote = document.createElement("i");
+    $leftQuote.className = "fa fa-quote-left pull-left fa-large text-muted";
+    let $text = document.createElement("p");
+    $text.className = stnDescriptionClass, $text.textContent = description;
+    let $rightQuote = document.createElement("i");
+    return $rightQuote.className = "fa fa-quote-right pull-right fa-large text-muted", $quoteBox.append($leftQuote, $text, $rightQuote), $quoteBox;
+  }, createListingBody = ({ fullTitle, intent, url, description }) => {
+    let meta = intentMeta[intent], $body = document.createElement("div");
+    $body.className = "listing-body";
+    let $header = document.createElement("div");
+    $header.className = "listing-header";
+    let $title = document.createElement("div");
+    $title.className = "listing-title";
+    let $intent = document.createElement("i");
+    $intent.className = meta.iconClass;
+    let $name = document.createElement("h5");
+    $name.textContent = fullTitle;
+    let $icon = document.createElement("img");
+    $icon.className = stnIconClass, $icon.src = stnIconUrl, $icon.alt = stnSiteName, $icon.title = stnSiteName, $name.append(" ", $icon);
+    let $buttons = document.createElement("div");
+    return $buttons.className = "listing-buttons", $buttons.append(
+      createExternalLink({
+        href: url,
+        title: meta.action,
+        className: `btn btn-xs btn-bottom btn-primary ${stnLinkClass}`,
+        iconClass: "fa fa-exchange"
+      })
+    ), $title.append($intent, $name), $header.append($title, $buttons), $body.append(
+      $header,
+      createDateLine({ url }),
+      createQuoteBox(description)
+    ), $body;
+  };
+  function createListing({
+    $itemTemplate,
+    fullTitle,
+    price,
+    compactPrice,
+    intent,
+    url,
+    description
+  }) {
+    let $listing = document.createElement("li");
+    $listing.className = `listing ${stnListingClass} ${keysOnlyPriceListingClass}`.trim(), $listing.id = `listing-stn-${intent}`;
+    let $listingItem = document.createElement("div");
+    return $listingItem.className = "listing-item", $listingItem.append(
+      createItemElement($itemTemplate, {
+        price,
+        compactPrice,
+        intent,
+        url,
+        description
+      })
+    ), $listing.append(
+      $listingItem,
+      createListingBody({ fullTitle, intent, url, description })
+    ), $listing;
+  }
+
+  // src/features/StnListings/price.js
+  var defaultRefPerKey = 65.5, keyPattern = /([\d.]+)\s*keys?\b/i, refPattern = /([\d.]+)\s*(?:ref|refined)\b/i, median = (values) => {
+    let sorted = [...values].sort((a, b) => a - b);
+    return sorted[Math.floor(sorted.length / 2)];
+  }, parsePrice = (price = "") => {
+    let value = `${price}`, keyMatch = value.match(keyPattern), refMatch = value.match(refPattern);
+    return {
+      keys: keyMatch ? Number.parseFloat(keyMatch[1]) : 0,
+      ref: refMatch ? Number.parseFloat(refMatch[1]) : 0
+    };
+  }, priceToKeys = (price, refPerKey = defaultRefPerKey) => {
+    let { keys, ref } = parsePrice(price);
+    return keys + ref / refPerKey;
+  }, formatKeys = (value) => {
+    if (!Number.isFinite(value)) return "";
+    let rounded = Math.round(value * 100) / 100;
+    return `${rounded} ${rounded === 1 ? "key" : "keys"}`;
+  }, estimateRefPerKey = ($section) => {
+    let ratios = [];
+    return $section.querySelectorAll(`li.listing:not(.${stnListingClass})`).forEach(($listing) => {
+      let $item = $listing.querySelector(".item");
+      if (!$item) return;
+      let { keys, ref } = parsePrice($item.dataset.listing_price);
+      if (!ref) return;
+      let keyPart = Number.parseFloat(
+        $listing.querySelector(".tag.bottom-right")?.textContent ?? ""
+      ) - keys, ratio = ref / keyPart;
+      keyPart > 0 && ratio > 20 && ratio < 200 && ratios.push(ratio);
+    }), ratios.length ? median(ratios) : defaultRefPerKey;
+  }, insertListingByPrice = ($list, $listing, value, intent, refPerKey) => {
+    let $before = null, closestValue = null;
+    [...$list.children].forEach(($competitor) => {
+      if (!$competitor.matches("li.listing")) return;
+      let competitorValue = priceToKeys(
+        $competitor.querySelector(".item")?.dataset.listing_price,
+        refPerKey
+      );
+      competitorValue <= 0 || !(intent === "sell" ? competitorValue > value : competitorValue < value) || !(closestValue === null || (intent === "sell" ? competitorValue < closestValue : competitorValue > closestValue)) || ($before = $competitor, closestValue = competitorValue);
+    }), $before ? $list.insertBefore($listing, $before) : $list.append($listing);
+  };
+
+  // src/features/StnListings/index.js
+  var findOrderList = ($section, headingText) => {
+    let $list = [...$section.querySelectorAll("h4")].find(
+      ($h) => $h.textContent.trim().toLowerCase() === headingText
+    )?.nextElementSibling;
+    return $list?.matches("ul.media-list") ? $list : null;
+  }, buildDescription = ({ fullTitle, intent, price, stock = 0 }) => intent === "buy" ? `${price} \u2014 STN.tf is buying ${fullTitle}.` : `${price} \u2014 STN.tf is selling ${fullTitle}${stock > 0 ? ` (${stock} in stock)` : ""}.`, StnListings = class _StnListings {
+    static async inject($section, itemData) {
+      if (!_StnListings._canInject($section, itemData)) return;
+      let $itemTemplate = document.querySelector(
+        ".stats-header-item > .item"
+      );
+      if (!$itemTemplate) return;
+      let url = buildStnItemUrl(itemData), page;
+      try {
+        let html = await requestText(url);
+        page = new DOMParser().parseFromString(html, "text/html");
+      } catch (error) {
+        console.warn("STN.tf listings are unavailable:", error.message);
+        return;
+      }
+      let prices = parseItemPage(page);
+      if (!prices) return;
+      let fullTitle = [itemData.effect_name, itemData.name].filter(Boolean).join(" "), refPerKey = estimateRefPerKey($section), $sellList = findOrderList($section, "sell orders"), $buyList = findOrderList($section, "buy orders"), addOrder = ({ $list, intent, price, stock = 0 }) => {
+        if (!price || !$list) return;
+        let keysValue = priceToKeys(price, refPerKey), compactPrice = formatKeys(keysValue);
+        if (!compactPrice || keysValue <= 0) return;
+        let description = buildDescription({
+          fullTitle,
+          intent,
+          price,
+          stock
+        });
+        insertListingByPrice(
+          $list,
+          createListing({
+            $itemTemplate,
+            fullTitle,
+            price,
+            compactPrice,
+            intent,
+            url,
+            description
+          }),
+          keysValue,
+          intent,
+          refPerKey
+        );
+      };
+      addOrder({
+        $list: $buyList,
+        intent: "buy",
+        price: prices.buyOrderPrice
+      }), addOrder({
+        $list: $sellList,
+        intent: "sell",
+        price: prices.sellOrderPrice,
+        stock: prices.stock
+      });
+    }
+    /**
+     * Strange unusuals have their own stats page while STN.tf only has the normal
+     * unusual, so those pages are left alone.
+     */
+    static _canInject($section, itemData) {
+      return !$section || !itemData?.effect_name || itemData.quality !== "5" ? !1 : !$section.querySelector(`.${stnListingClass}`);
+    }
+  };
+
+  // src/features/StatsLinks/customButtons.js
+  var customButtonsStorageKey = "custom_site_buttons", defaultStripCharacters = "'!(|):", defaultSpaceReplacer = "+", variablePattern = /\{([a-zA-Z0-9_]+)\}/g, cleanValue = (value, stripCharacters = "") => {
+    let text = String(value ?? "").trim();
+    return stripCharacters ? [...stripCharacters].reduce(
+      (cleaned, character) => cleaned.split(character).join(""),
+      text
+    ) : text;
+  }, applyCustomTemplate = (template = "", itemData = {}, { strip = "", space = "" } = {}) => String(template ?? "").replace(variablePattern, (_, key) => cleanValue(itemData[key], strip).replace(/\s+/g, () => space)), createCustomButtonId = () => `custom_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`, normalizeCustomButton = (button = {}) => ({
+    id: button.id || createCustomButtonId(),
+    name: typeof button.name == "string" ? button.name : "",
+    link: typeof button.link == "string" ? button.link : "",
+    icon: typeof button.icon == "string" ? button.icon : "",
+    strip: typeof button.strip == "string" ? button.strip : defaultStripCharacters,
+    space: typeof button.space == "string" ? button.space : defaultSpaceReplacer
+  }), getCustomButtons = () => {
+    let stored = gmStorage_default.get(customButtonsStorageKey, []);
+    return Array.isArray(stored) ? stored.map(normalizeCustomButton).filter((button) => button.link.trim()) : [];
+  }, saveCustomButtons = (buttons = []) => gmStorage_default.set(
+    customButtonsStorageKey,
+    buttons.map(normalizeCustomButton).filter((button) => button.link.trim())
+  ), buildCustomLink = (button, itemData) => applyCustomTemplate(button.link, itemData, button), buildCustomName = (button, itemData) => applyCustomTemplate(button.name, itemData, button).trim() || "Custom button", buildCustomIcon = (button, itemData, resolvedLink) => {
+    let icon = applyCustomTemplate(button.icon, itemData, button).trim();
+    if (icon)
+      return /^fa[srb]?\s/.test(icon) || icon.startsWith("fa-") ? {
+        iconClass: icon.startsWith("fa-") ? `fa ${icon}` : icon
+      } : { iconUrl: icon };
+    try {
+      let host = new URL(resolvedLink, window.location.href).hostname;
+      return {
+        iconUrl: `https://www.google.com/s2/favicons?sz=64&domain=${encodeURIComponent(
+          host
+        )}`
+      };
+    } catch {
+      return { iconClass: "fa fa-link" };
+    }
+  };
+
+  // src/features/StatsLinks/CustomButtonsConfigurator.js
+  var presetSpaceReplacers = [
+    { label: "+", value: "+", title: "Replace spaces with +" },
+    { label: "-", value: "-", title: "Replace spaces with -" },
+    { label: "_", value: "_", title: "Replace spaces with _" },
+    { label: "%20", value: "%20", title: "Replace spaces with %20" },
+    { label: "none", value: "", title: "Remove spaces" }
+  ], preferredVariableKeys = [
+    "effect_name",
+    "name",
+    "base_name",
+    "defindex",
+    "quality",
+    "effect_id",
+    "app"
+  ], CustomButtonsConfigurator = class {
+    constructor({
+      itemData = {},
+      createPreview = () => null,
+      onChange = () => {
+      }
+    } = {}) {
+      this.itemData = itemData, this.createPreview = createPreview, this.onChange = onChange, this.buttons = getCustomButtons(), this.editingId = null, this.lastField = null, this._handleKeydown = (event) => {
+        event.key === "Escape" && this.close();
+      }, this._render();
+    }
+    _render() {
+      this.$overlay = document.createElement("div"), this.$overlay.className = "bcp-custom-buttons-overlay", this.$overlay.addEventListener("click", (event) => {
+        event.target === this.$overlay && this.close();
+      }), this.$panel = document.createElement("div"), this.$panel.className = "panel panel-main bcp-custom-buttons-panel", this.$panel.append(
+        this._createHeader(),
+        this._createBody(),
+        this._createFooter()
+      ), this.$overlay.append(this.$panel), document.body.append(this.$overlay), document.addEventListener("keydown", this._handleKeydown), this._refreshList(), this._updatePreview(), this.$link.focus();
+    }
+    _createHeader() {
+      let $header = document.createElement("div");
+      $header.className = "panel-heading bcp-custom-buttons-heading";
+      let $title = document.createElement("span");
+      $title.textContent = "Custom buttons";
+      let $close = document.createElement("button");
+      return $close.type = "button", $close.className = "bcp-custom-buttons-close", $close.title = "Close", $close.innerHTML = '<i class="fa fa-times"></i>', $close.addEventListener("click", () => this.close()), $header.append($title, $close), $header;
+    }
+    _createBody() {
+      let $body = document.createElement("div");
+      $body.className = "panel-body bcp-custom-buttons-body", this.$list = document.createElement("div"), this.$list.className = "bcp-custom-list", $body.append(this.$list, document.createElement("hr")), this.$formTitle = document.createElement("h4"), this.$formTitle.textContent = "Add custom button", $body.append(this.$formTitle), this.$name = this._createInput("My site"), this.$link = this._createInput("https://site.com/{effect_name}/{name}"), this.$icon = this._createInput("https://site.com/icon.png or fa-link"), this.$strip = this._createInput(defaultStripCharacters, !1), this.$strip.value = defaultStripCharacters, this.$space = this._createInput("+", !1), this.$space.value = defaultSpaceReplacer, this.lastField = this.$link;
+      let $linkGroup = this._createFormGroup({
+        label: "Link template",
+        input: this.$link,
+        help: "Click a variable below to insert it at the cursor."
+      });
+      return $linkGroup.append(this._createVariableList()), $body.append(
+        this._createFormGroup({
+          label: "Button name",
+          input: this.$name,
+          help: "Shown under \u201CView on\u201D. Variables are allowed."
+        }),
+        $linkGroup,
+        this._createFormGroup({
+          label: "Icon",
+          input: this.$icon,
+          help: "Image URL or Font Awesome class. Empty uses the site favicon."
+        }),
+        this._createFormGroup({
+          label: "Strip symbols",
+          input: this.$strip,
+          help: "Characters removed from every variable value."
+        }),
+        this._createSpaceGroup(),
+        this._createPreviewGroup()
+      ), $body;
+    }
+    _createFooter() {
+      let $footer = document.createElement("div");
+      $footer.className = "panel-footer bcp-custom-buttons-footer", this.$status = document.createElement("span"), this.$status.className = "bcp-custom-buttons-status", this.$save = document.createElement("button"), this.$save.type = "button", this.$save.className = "btn btn-primary btn-sm", this.$save.textContent = "Add button", this.$save.addEventListener("click", () => this._handleSave());
+      let $cancel = document.createElement("button");
+      return $cancel.type = "button", $cancel.className = "btn btn-default btn-sm", $cancel.textContent = "Close", $cancel.addEventListener("click", () => this.close()), $footer.append(this.$status, $cancel, this.$save), $footer;
+    }
+    _createInput(placeholder, trackVariable = !0) {
+      let $input = document.createElement("input");
+      return $input.type = "text", $input.className = "form-control input-sm", $input.placeholder = placeholder, trackVariable && $input.addEventListener("focus", () => {
+        this.lastField = $input;
+      }), $input.addEventListener("input", () => this._updatePreview()), $input;
+    }
+    _createFormGroup({ label, input, help }) {
+      let $group = document.createElement("div");
+      $group.className = "form-group";
+      let $label = document.createElement("label");
+      $label.textContent = label;
+      let $help = document.createElement("p");
+      return $help.className = "help-block", $help.textContent = help, $group.append($label, input, $help), $group;
+    }
+    _createSpaceGroup() {
+      let $presets = document.createElement("div");
+      $presets.className = "bcp-custom-buttons-presets", presetSpaceReplacers.forEach(({ label, value, title }) => {
+        let $preset = document.createElement("button");
+        $preset.type = "button", $preset.className = "btn btn-default btn-xs", $preset.textContent = label, $preset.title = title, $preset.addEventListener("click", () => {
+          this.$space.value = value, this.$space.focus(), this._updatePreview();
+        }), $presets.append($preset);
+      });
+      let $group = this._createFormGroup({
+        label: "Space replacer",
+        input: this.$space,
+        help: "Whitespace inside a variable value becomes this."
+      });
+      return $group.append($presets), $group;
+    }
+    _getVariableKeys() {
+      let keys = Object.keys(this.itemData ?? {});
+      return [
+        ...preferredVariableKeys.filter(
+          (key) => keys.includes(key)
+        ),
+        ...keys.filter((key) => !preferredVariableKeys.includes(key))
+      ];
+    }
+    _createVariableList() {
+      let $variables = document.createElement("div");
+      $variables.className = "bcp-custom-buttons-variables";
+      let $label = document.createElement("span");
+      return $label.className = "bcp-custom-buttons-variables-label", $label.textContent = "Insert:", $variables.append($label), this._getVariableKeys().forEach((key) => {
+        let $variable = document.createElement("button");
+        $variable.type = "button", $variable.className = "btn btn-default btn-xs bcp-custom-variable", $variable.textContent = `{${key}}`, $variable.title = `${key}: ${this.itemData[key] ?? ""}`, $variable.addEventListener(
+          "click",
+          () => this._insertVariable(key)
+        ), $variables.append($variable);
+      }), $variables;
+    }
+    _createPreviewGroup() {
+      let $group = document.createElement("div");
+      $group.className = "form-group";
+      let $label = document.createElement("label");
+      return $label.textContent = "Preview", this.$preview = document.createElement("div"), this.$preview.className = "bcp-custom-buttons-preview price-boxes", this.$previewUrl = document.createElement("div"), this.$previewUrl.className = "bcp-custom-buttons-preview-url", $group.append($label, this.$preview, this.$previewUrl), $group;
+    }
+    _insertVariable(key) {
+      let $field = this.lastField ?? this.$link, text = `{${key}}`, start = $field.selectionStart ?? $field.value.length, end = $field.selectionEnd ?? start;
+      $field.value = $field.value.slice(0, start) + text + $field.value.slice(end), $field.focus(), $field.setSelectionRange(start + text.length, start + text.length), this._updatePreview();
+    }
+    _readForm() {
+      return {
+        id: this.editingId ?? createCustomButtonId(),
+        name: this.$name.value.trim(),
+        link: this.$link.value.trim(),
+        icon: this.$icon.value.trim(),
+        strip: this.$strip.value,
+        space: this.$space.value
+      };
+    }
+    _updatePreview() {
+      if (!this.$preview) return;
+      let form = this._readForm();
+      try {
+        let $preview = this.createPreview(form);
+        this.$preview.replaceChildren(...$preview ? [$preview] : []), this.$previewUrl.textContent = buildCustomLink(form, this.itemData) || "No link yet";
+      } catch (error) {
+        console.error("Custom button preview failed:", error);
+        let $error = document.createElement("span");
+        $error.className = "text-danger", $error.textContent = "Preview failed.", this.$preview.replaceChildren($error), this.$previewUrl.textContent = "";
+      }
+    }
+    _refreshList() {
+      if (this.buttons = getCustomButtons(), this.$list.replaceChildren(), !this.buttons.length) {
+        let $empty = document.createElement("p");
+        $empty.className = "text-muted", $empty.textContent = "No custom buttons yet.", this.$list.append($empty);
+        return;
+      }
+      this.buttons.forEach((button) => {
+        let $row = document.createElement("div");
+        $row.className = "bcp-custom-buttons-row";
+        let $preview = document.createElement("div");
+        $preview.className = "bcp-custom-buttons-row-preview price-boxes", $preview.append(this.createPreview(button));
+        let $info = document.createElement("div");
+        $info.className = "bcp-custom-buttons-row-info";
+        let $name = document.createElement("div");
+        $name.className = "bcp-custom-buttons-row-name", $name.textContent = buildCustomName(button, this.itemData);
+        let $template = document.createElement("div");
+        $template.className = "bcp-custom-buttons-row-template", $template.textContent = button.link, $template.title = button.link, $info.append($name, $template);
+        let $actions = document.createElement("div");
+        $actions.className = "bcp-custom-buttons-row-actions";
+        let $edit = document.createElement("button");
+        $edit.type = "button", $edit.className = "btn btn-default btn-xs", $edit.title = "Edit", $edit.innerHTML = '<i class="fa fa-pencil"></i>', $edit.addEventListener("click", () => this._edit(button.id));
+        let $delete = document.createElement("button");
+        $delete.type = "button", $delete.className = "btn btn-danger btn-xs", $delete.title = "Delete", $delete.innerHTML = '<i class="fa fa-trash"></i>', $delete.addEventListener("click", () => this._delete(button.id)), $actions.append($edit, $delete), $row.append($preview, $info, $actions), this.$list.append($row);
+      });
+    }
+    _edit(id) {
+      let button = this.buttons.find((entry) => entry.id === id);
+      button && (this.editingId = id, this.$name.value = button.name, this.$link.value = button.link, this.$icon.value = button.icon, this.$strip.value = button.strip, this.$space.value = button.space, this.$formTitle.textContent = "Edit custom button", this.$save.textContent = "Update button", this._updatePreview(), this.$name.focus());
+    }
+    _delete(id) {
+      let button = this.buttons.find((entry) => entry.id === id);
+      if (!button) return;
+      let name = buildCustomName(button, this.itemData);
+      window.confirm(`Delete "${name}"?`) && (saveCustomButtons(this.buttons.filter((entry) => entry.id !== id)), this.editingId === id && this._resetForm(), this._refreshList(), this._updatePreview(), this.onChange());
+    }
+    _handleSave() {
+      let button = this._readForm();
+      if (!button.link) {
+        this._setStatus("Link template is required.", !0), this.$link.focus();
+        return;
+      }
+      let nextButtons = this.editingId ? this.buttons.map(
+        (entry) => entry.id === this.editingId ? button : entry
+      ) : [...this.buttons, button];
+      saveCustomButtons(nextButtons), this._resetForm(), this._refreshList(), this._updatePreview(), this.onChange(), this._setStatus("Saved.", !1);
+    }
+    _resetForm() {
+      this.editingId = null, this.$name.value = "", this.$link.value = "", this.$icon.value = "", this.$strip.value = defaultStripCharacters, this.$space.value = defaultSpaceReplacer, this.$formTitle.textContent = "Add custom button", this.$save.textContent = "Add button", this.$link.focus();
+    }
+    _setStatus(message, isError) {
+      this.$status.textContent = message, this.$status.className = `bcp-custom-buttons-status ${isError ? "text-danger" : "text-success"}`;
+    }
+    close() {
+      document.removeEventListener("keydown", this._handleKeydown), this.$overlay.remove();
     }
   };
 
@@ -1220,7 +2526,8 @@ footer {
       this.$mainColumn.replaceChildren(
         ...$nativeBoxes,
         ...this._createRowFillers($nativeBoxes.length, $addedButtons.length),
-        ...$addedButtons
+        ...$addedButtons,
+        this._createAddButton()
       );
     }
     /**
@@ -1284,22 +2591,67 @@ footer {
       return marketplaceSite ? this._createSiteLink(marketplaceSite) : null;
     }
     _getVisibleSites() {
-      return sites.filter((site) => !_StatsLinks.isSiteHidden(site.siteName));
+      let visibleSites = sites.filter(
+        (site) => !_StatsLinks.isSiteHidden(site.siteName)
+      ), customSites = getCustomButtons().map((button) => ({
+        ...button,
+        custom: !0
+      }));
+      return [...visibleSites, ...customSites];
+    }
+    /**
+     * A saved custom-button config rendered exactly like the native site buttons.
+     * The configurator uses it for the live preview.
+     */
+    createCustomPreview(button) {
+      return this._createSiteLink({ ...button, custom: !0 });
+    }
+    _createAddButton() {
+      let $button = document.createElement("button");
+      $button.type = "button", $button.className = "price-box bcp-add-button", $button.title = "Add a custom button";
+      let $icon = document.createElement("i");
+      $icon.className = "fa fa-plus";
+      let $text = document.createElement("span");
+      return $text.className = "bcp-add-button-text", $text.textContent = "Add button", $button.append($icon, $text), $button.addEventListener(
+        "click",
+        () => this._openCustomButtonsConfigurator()
+      ), $button;
+    }
+    _openCustomButtonsConfigurator() {
+      document.querySelector(".bcp-custom-buttons-overlay") || new CustomButtonsConfigurator({
+        itemData: this.itemData,
+        createPreview: (button) => this.createCustomPreview(button),
+        onChange: () => this.refreshSiteLinks()
+      });
     }
     _createSiteLink(site) {
-      let $link = document.createElement("a");
-      return $link.className = "price-box", $link.dataset.tip = "top", $link.title = site.siteName, $link.href = buildSiteLink(site, this.itemData), $link.target = "_blank", $link.innerHTML = `
-            <div class="icon"></div>
-            <div class="text">
-                <div class="value" style="font-size: 10px; color: #54748b">
-                    View on
-                </div>
-                <div class="subtitle" style="font-size: 18px; color: #555">
-                    ${site.siteName.replace(".store", "")}
-                </div>
-            </div>`, $link.querySelector(".icon").append(this._createIcon(site)), $link;
+      let isCustom = !!site.custom, name = isCustom ? buildCustomName(site, this.itemData) : site.siteName, href = isCustom ? buildCustomLink(site, this.itemData) : buildSiteLink(site, this.itemData), $link = document.createElement("a");
+      $link.className = `price-box${isCustom ? " bcp-custom-site" : ""}`, $link.dataset.tip = "top", $link.title = name, $link.href = href, $link.target = "_blank";
+      let $icon = document.createElement("div");
+      $icon.className = "icon", $icon.append(this._createIcon(site, href, name));
+      let $text = document.createElement("div");
+      $text.className = "text";
+      let $value = document.createElement("div");
+      $value.className = "value", $value.style.cssText = "font-size: 10px; color: #54748b", $value.textContent = "View on";
+      let $subtitle = document.createElement("div");
+      return $subtitle.className = "subtitle", $subtitle.style.cssText = "font-size: 18px; color: #555", $subtitle.textContent = isCustom ? name : name.replace(".store", ""), $text.append($value, $subtitle), $link.append($icon, $text), $link;
     }
-    _createIcon(site) {
+    _createIcon(site, href, name = "") {
+      if (site.custom) {
+        let { iconClass, iconUrl } = buildCustomIcon(
+          site,
+          this.itemData,
+          href
+        );
+        if (iconClass) {
+          let $icon2 = document.createElement("i");
+          return $icon2.className = iconClass, $icon2;
+        }
+        if (iconUrl) {
+          let $icon2 = document.createElement("img");
+          return $icon2.src = iconUrl, $icon2.alt = name, $icon2.style = "border-radius: 5px; padding: 0; margin-top: -5px;", $icon2;
+        }
+      }
       if (site.iconClass) {
         let $icon2 = document.createElement("i");
         return $icon2.className = site.iconClass, $icon2;
@@ -1360,8 +2712,15 @@ footer {
         event.preventDefault(), event.stopPropagation(), item.active = !!this.onToggle(item), this._renderItemIcon($icon, item);
       }), $li.append($link), $li;
     }
+    /**
+     * `icons` overrides the eye pair, the `on` glyph is used while the item is active.
+     */
     _renderItemIcon($icon, item) {
-      $icon.classList.toggle(hiddenItemIconClass, !!item.active), $icon.classList.toggle(visibleItemIconClass, !item.active);
+      let icons = item.icons ?? {
+        on: hiddenItemIconClass,
+        off: visibleItemIconClass
+      };
+      $icon.classList.remove(icons.on, icons.off), $icon.classList.add(item.active ? icons.on : icons.off);
     }
     close() {
       this.$e.classList.remove("open");
@@ -1416,7 +2775,7 @@ footer {
         return [$headers[$headers.length - 1], $statsBody.querySelectorAll(".row")[1]];
       }
     }
-  ], amountHeaderIndex = 2;
+  ], amountHeaderIndex = 2, collapseModulesKey = "stats_modules_collapsed";
 
   // src/features/StatsModulesController/index.js
   var notHideableModules = ["classifieds", "Suggestions"], StatsModulesController = class {
@@ -1444,7 +2803,7 @@ footer {
         $container.setAttribute("position", module.position), $container.className = module.moduleName.toLowerCase().replace(/ /g, "-"), $container.append(...module.elements), $container.addEventListener(
           "dblclick",
           () => this._toggleModule(module)
-        ), this.$statsBody.append($container);
+        ), module.$container = $container, this.$statsBody.append($container);
       }), this._renderAmountHeader();
     }
     _renderAmountHeader() {
@@ -1454,7 +2813,7 @@ footer {
       $header.innerText = this._getAmountLabel(amount), amount === 0 && ($header.style.color = "red"), $header.addEventListener(
         "dblclick",
         () => this._toggleModule(firstModule)
-      ), firstModule.elements.push($header), this.$statsBody.prepend($header);
+      ), firstModule.elements.push($header), this.$amountHeader = $header, this.$statsBody.prepend($header);
     }
     _getAmountLabel(amount) {
       return amount === 0 ? "Item may not exist" : amount === "only one" ? "Only one instance exists" : `${amount} instances exist`;
@@ -1483,15 +2842,28 @@ footer {
     /**
      * Module and site button toggles in one list, separated by a divider.
      * The eye icon of a row shows its state, so labels stay short.
+     * The first row collapses every module but the classifieds and the suggestions.
      */
     _getSettingsItems() {
-      let moduleItems = this.modules.filter((module) => module.hideKey).map((module) => ({
+      let collapseItem = this._getCollapseItem(), moduleItems = this.modules.filter((module) => module.hideKey).map((module) => ({
         kind: "module",
         label: module.moduleName,
         active: !!gmStorage_default.get(module.hideKey, !1),
         payload: module
-      })), siteItems = this._getSiteLinkItems();
-      return siteItems.length ? [...moduleItems, { divider: !0 }, ...siteItems] : moduleItems;
+      })), siteItems = this._getSiteLinkItems(), items = collapseItem ? [collapseItem, { divider: !0 }, ...moduleItems] : moduleItems;
+      return siteItems.length ? [...items, { divider: !0 }, ...siteItems] : items;
+    }
+    /**
+     * Hides every module with its title, so the listings are seen at once.
+     * A plus glyph means the page is collapsed, a minus glyph - expanded.
+     */
+    _getCollapseItem() {
+      return this._getCollapsibleModules().length ? {
+        kind: "collapse",
+        label: "Collapse modules",
+        active: !!gmStorage_default.get(collapseModulesKey, !1),
+        icons: { on: "fa-plus", off: "fa-minus" }
+      } : null;
     }
     _getSiteLinkItems() {
       return this.statsLinks?.$container ? sites.map((site) => ({
@@ -1502,16 +2874,36 @@ footer {
       })) : [];
     }
     _toggleSettingsItem(item) {
-      return item.kind === "site" ? this.statsLinks.toggleSite(item.payload.siteName) : this._toggleModuleVisibility(item.payload);
+      return item.kind === "collapse" ? this._toggleModulesCollapse() : item.kind === "site" ? this.statsLinks.toggleSite(item.payload.siteName) : this._toggleModuleVisibility(item.payload);
     }
     _toggleModuleVisibility(module) {
-      let enabled = gmStorage_default.toggle(module.hideKey, !1);
-      return this._toggleModule(module), enabled;
+      let hidden = gmStorage_default.toggle(module.hideKey, !1);
+      return this._toggleModule(module), hidden || this._setModuleCollapsed(module, !1), hidden;
+    }
+    _toggleModulesCollapse() {
+      let collapsed = gmStorage_default.toggle(collapseModulesKey, !1);
+      return this._applyCollapse(collapsed), collapsed;
+    }
+    _applyCollapse(collapsed) {
+      this._getCollapsibleModules().forEach(
+        (module) => this._setModuleCollapsed(module, collapsed)
+      ), this.$amountHeader?.classList.toggle("hidden", collapsed);
+    }
+    _setModuleCollapsed(module, collapsed) {
+      module.$container?.classList.toggle("hidden", collapsed);
+    }
+    /**
+     * Every module of the page except the classifieds and the suggestions.
+     */
+    _getCollapsibleModules() {
+      return this.modules.filter(
+        (module) => module.exists && !notHideableModules.includes(module.moduleName)
+      );
     }
     _applyDefaults() {
       this.modules.forEach((module) => {
         module.hideKey && gmStorage_default.get(module.hideKey, !1) && this._toggleModule(module);
-      });
+      }), gmStorage_default.get(collapseModulesKey, !1) && this._applyCollapse(!0);
     }
   };
 
@@ -1591,9 +2983,14 @@ footer {
   };
 
   // src/pages/statsPage.js
-  var classifiedsHeadingSelector = "h2#classifieds", initClassifiedsSection = () => {
+  var classifiedsHeadingSelector = "h2#classifieds", initClassifiedsSection = async (itemData) => {
     let $heading = document.querySelector(classifiedsHeadingSelector), $section = $heading?.parentElement;
     if (!$section) return;
+    try {
+      await StnListings.inject($section, itemData);
+    } catch (error) {
+      console.error("Failed to load STN.tf listings:", error);
+    }
     new EntitiesController($section);
     let { listings } = new ListingsController(Store.listings);
     new ListingsControl({
@@ -1601,13 +2998,15 @@ footer {
       filters: listingFilters.filter(
         (filter) => !filter.isGlobal && !filter.classifiedsOnly
       ),
-      ui: { $anchor: $heading, withPanel: !1 }
+      ui: { $anchor: $heading, withPanel: !1, withToggler: !0 }
     });
   }, statsPage_default2 = {
     init() {
       injectStatsPageStyles();
       let statsLinks = new StatsLinks();
-      new StatsQuickLinks(), new StatsModulesController({ statsLinks }), initClassifiedsSection();
+      new StatsQuickLinks(), new StatsModulesController({ statsLinks }), initClassifiedsSection(statsLinks.itemData).catch(
+        (error) => console.error("Failed to init the classifieds section:", error)
+      );
     }
   };
 
@@ -1644,7 +3043,7 @@ footer {
 
   // src/utils/removeAdOnCurrentPage.js
   function removeAdOnCurrentPage() {
-    document.querySelector("#media-topbox")?.closest(".panel")?.remove();
+    document.querySelector("#media-topbox").closest(".panel").remove();
   }
 
   // src/router/index.js
