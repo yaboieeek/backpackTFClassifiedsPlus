@@ -1,12 +1,11 @@
 // ==UserScript==
 // @name         backpackTFClassifieds+
 // @namespace    https://steamcommunity.com/profiles/76561198967088046
-// @version      2.4
-// @description  YUHH
+// @version      2.5 
+// @description  adds classifieds, stats and navigation tools to backpack.tf
 // @author       eeek
-// @match        https://backpack.tf/classifieds?*
-// @match        https://backpack.tf/stats/*
-// @match        https://backpack.tf/profiles/*
+// @match        https://backpack.tf/*
+// @noframes
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=backpack.tf
 // @source       https://github.com/yaboieeek/backpackTFClassifiedsPlus/
 // @updateURL https://github.com/yaboieeek/backpackTFClassifiedsPlus/raw/refs/heads/main/backpackTFClassifiedsPlus.user.js
@@ -19,720 +18,6 @@
 // ==/UserScript==
 
 (() => {
-  // src/entities/item/index.js
-  var Item = class {
-    constructor(element) {
-      this.$e = element, this._fromElement();
-    }
-    /**
-     * Raw `data-*` attributes of the item element (`listing_price`, `effect_id`, ...).
-     */
-    get data() {
-      return this.$e.dataset;
-    }
-    _fromElement() {
-      Object.entries(this.$e.dataset).forEach(([k, v]) => {
-        k !== "data" && (this[k] = v);
-      });
-    }
-  };
-
-  // src/entities/user/index.js
-  var User = class {
-    constructor(element) {
-      this.$e = element, this._fromElement();
-    }
-    _fromElement() {
-      Object.entries(this.$e.dataset).forEach(([k, v]) => this[k] = v);
-    }
-  };
-
-  // src/entities/listing/index.js
-  var Listing = class {
-    constructor(element) {
-      this.$e = element, this._getFullData();
-    }
-    /**
-     * Listing data lives on the nested `.item` element.
-     */
-    get data() {
-      return this.item?.data ?? {};
-    }
-    _getFullData() {
-      this._getUser(), this._getItem();
-    }
-    _getItem() {
-      let $item = this.$e.querySelector(".item");
-      this.item = $item ? new Item($item) : null;
-    }
-    _getUser() {
-      let $user = this.$e.querySelector(".user-link");
-      this.user = $user ? new User($user) : null;
-    }
-  };
-
-  // src/store/index.js
-  var Store = {
-    items: [],
-    listings: [],
-    users: []
-  };
-
-  // src/features/EntitiesController/index.js
-  var EntitiesController = class {
-    constructor($root = document) {
-      this.store = Store, this.$root = $root, this._loadPageEntities(), console.log(this.store);
-    }
-    _loadPageEntities() {
-      this.store.users = [...this.$root.querySelectorAll(".user-handle a")].map(
-        (e) => new User(e)
-      ), this.store.items = [...this.$root.querySelectorAll(".item")].map(
-        (e) => new Item(e)
-      ), this.store.listings = [...this.$root.querySelectorAll(".listing")].map(
-        ($e) => new Listing($e)
-      );
-    }
-  };
-
-  // src/utils/gmStorage.js
-  var memoryStorage = /* @__PURE__ */ new Map(), hasGMStorage = () => typeof GM_getValue == "function" && typeof GM_setValue == "function", GMStorage = {
-    get(key, fallback = null) {
-      if (!hasGMStorage())
-        return memoryStorage.has(key) ? memoryStorage.get(key) : fallback;
-      try {
-        return GM_getValue(key, fallback);
-      } catch (error) {
-        return console.error(`GMStorage: failed to read "${key}"`, error), fallback;
-      }
-    },
-    set(key, value) {
-      if (!hasGMStorage())
-        return memoryStorage.set(key, value), value;
-      try {
-        GM_setValue(key, value);
-      } catch (error) {
-        console.error(`GMStorage: failed to write "${key}"`, error);
-      }
-      return value;
-    },
-    toggle(key, fallback = !1) {
-      let nextValue = !GMStorage.get(key, fallback);
-      return GMStorage.set(key, nextValue);
-    }
-  }, gmStorage_default = GMStorage;
-
-  // src/utils/whenPageReady.js
-  function whenPageReady(callback) {
-    let run = () => requestAnimationFrame(() => requestAnimationFrame(callback));
-    document.readyState === "complete" ? run() : window.addEventListener("load", run, { once: !0 });
-  }
-
-  // src/entities/listing/const.js
-  var ListingType = Object.freeze({
-    DEFAULT: "default",
-    MARKETPLACE: "marketplace",
-    SPELL: "spell",
-    STRANGE: "strange"
-  }), listingTypeMeta = {
-    [ListingType.DEFAULT]: {},
-    [ListingType.MARKETPLACE]: {
-      hiddenClass: "marketplace-hidden",
-      highlightColor: "rgba(255,0,0, .15)"
-    },
-    [ListingType.SPELL]: {
-      hiddenClass: "spell-hidden",
-      highlightColor: "rgba(48,213,200, .15)"
-    },
-    [ListingType.STRANGE]: {
-      hiddenClass: "strange-hidden",
-      highlightColor: "rgba(255,165,0, .15)"
-    }
-  }, blockedListingHighlight = "rgba(0,0,0,.1)", blockedListingHiddenClass = "blocked-listing", compactListingClass = "compact-listing", compactListingDeviantClass = "compact-listing-deviant", compactPriceClass = "bcp-compact-price", compactPriceListingClass = "has-compact-price", fullCurrencyListingClass = "full-currency", keysOnlyPriceListingClass = "keys-only-price", ListingAgeGroup = Object.freeze({
-    FRESH: "fresh",
-    AGING: "aging",
-    OLD: "old"
-  }), listingAgeClasses = Object.freeze({
-    [ListingAgeGroup.FRESH]: "listing-age-fresh",
-    [ListingAgeGroup.AGING]: "listing-age-aging",
-    [ListingAgeGroup.OLD]: "listing-age-old"
-  }), listingDateMeta = Object.freeze({
-    data1: { label: "Bumped", icon: "fa fa-angle-up" },
-    data2: { label: "Listed", icon: "fa fa-calendar-o" }
-  }), freshListingMaxAgeInDays = 21, staleListingMinAgeInMonths = 2;
-
-  // src/features/ListingsControl/const.js
-  var panelAnchorSelector = ".row", panelHtml = `
-    <div class="panel panel-main">
-        <div class="panel-heading">Listings control</div>
-        <div class="panel-body padded"></div>
-    </div>
-`, collapsedKey = "stats_listings_control_collapsed", hideColors = { off: "#628c2a", on: "#c84b43" }, enableColors = { off: "#59636a", on: "#278094" }, listingFilters = [
-    {
-      key: "mp_listings",
-      label: "Marketplace",
-      colors: hideColors,
-      appliesTo: (listing) => listing.type === ListingType.MARKETPLACE,
-      apply: (listing) => listing.toggleVisibility()
-    },
-    {
-      key: "spells",
-      label: "Spells",
-      colors: hideColors,
-      classifiedsOnly: !0,
-      appliesTo: (listing) => listing.type === ListingType.SPELL,
-      apply: (listing) => listing.toggleVisibility()
-    },
-    {
-      key: "strange_unusuals",
-      label: "Strange unusuals",
-      colors: hideColors,
-      classifiedsOnly: !0,
-      appliesTo: (listing) => listing.type === ListingType.STRANGE,
-      apply: (listing) => listing.toggleVisibility()
-    },
-    {
-      key: "blocked_users",
-      label: "Blocked",
-      colors: hideColors,
-      defaultValue: !0,
-      appliesTo: (listing) => listing.blocked,
-      apply: (listing) => listing.toggleBlockedVisibility()
-    },
-    {
-      key: "truncating",
-      label: "Truncate",
-      colors: enableColors,
-      apply: (listing) => listing.truncateTheListing()
-    },
-    {
-      key: "compact_listings",
-      label: "Compact view",
-      colors: enableColors,
-      defaultValue: !0,
-      apply: (listing, enabled) => listing.setCompactMode(enabled)
-    },
-    {
-      key: "full_currency",
-      label: "Full currency",
-      colors: enableColors,
-      defaultValue: !0,
-      apply: (listing, enabled) => listing.setFullCurrency(enabled)
-    },
-    {
-      key: "plain_nicknames",
-      label: "Plain nicknames",
-      colors: enableColors,
-      apply: (listing) => listing.toggleSellerNameStyle()
-    },
-    {
-      key: "bump_to_listed",
-      label: "Bump to listed",
-      colors: enableColors,
-      apply: (listing) => listing.toggleListedTime()
-    },
-    {
-      key: "date_highlight",
-      label: "Date highlight",
-      colors: enableColors,
-      defaultValue: !0,
-      apply: (listing, enabled) => listing.setAgeHighlight(enabled)
-    },
-    {
-      key: "autoscroll",
-      label: "Autoscroll",
-      colors: enableColors,
-      isGlobal: !0
-    }
-  ];
-
-  // src/features/UI/components/ToggleControlButton/index.js
-  var ToggleControlButton = class {
-    constructor({
-      label = "",
-      colors = { off: "", on: "" },
-      active = !1,
-      count = 0,
-      onClick = () => active
-    } = {}) {
-      this.colors = colors, this.onClick = onClick, this.active = active, this.count = count, this.$e = document.createElement("button"), this.$e.className = "btn toggle-control-button", this.$e.innerText = label, this.$e.style.color = "white", this.$badge = document.createElement("span"), this.$badge.className = "toggle-control-badge", this.$e.addEventListener("click", () => {
-        this.active = !!this.onClick(), this._render();
-      }), this.$e.append(this.$badge), this._render();
-    }
-    _render() {
-      this.$e.style.backgroundColor = this.active ? this.colors.on : this.colors.off, this.$e.setAttribute("aria-pressed", String(this.active)), this.$badge.textContent = String(this.count), this.$badge.classList.toggle("hidden", !this._shouldShowBadge());
-    }
-    _shouldShowBadge() {
-      return this.active && this.count > 0;
-    }
-  };
-
-  // src/features/UI/listingsControl/index.js
-  var ListingsControlUI = class {
-    constructor({
-      buttons = [],
-      getState = () => !1,
-      getCount = () => 0,
-      onToggle = () => !1,
-      getCollapsed = () => !1,
-      onToggleCollapsed = () => !1,
-      $anchor = null,
-      withPanel = !0,
-      withToggler = !1
-    } = {}) {
-      this.buttons = buttons, this.getState = getState, this.getCount = getCount, this.onToggle = onToggle, this.getCollapsed = getCollapsed, this.onToggleCollapsed = onToggleCollapsed, this.$anchor = $anchor ?? document.querySelector(panelAnchorSelector), this.withPanel = withPanel, this.withToggler = withToggler, this._create();
-    }
-    _create() {
-      if (!this.$anchor) return;
-      let $host = this.withPanel ? this._createPanelHost() : document.createElement("div"), $buttonsTarget = $host.querySelector(".panel-body") ?? $host;
-      this.$controls = this._createControls(), $buttonsTarget.append(this.$controls), this.$anchor.after($host), this.withToggler && this._renderToggler();
-    }
-    _createPanelHost() {
-      let $row = document.createElement("div");
-      return $row.className = "row", $row.style.cssText = "margin-left: 0px; margin-right: 0px;", $row.innerHTML = panelHtml, $row;
-    }
-    _createControls() {
-      let $container = document.createElement("div");
-      return $container.className = "listings-control", this.buttons.forEach((filter) => {
-        $container.append(
-          new ToggleControlButton({
-            label: filter.label,
-            colors: filter.colors,
-            active: this.getState(filter),
-            count: this.getCount(filter),
-            onClick: () => this.onToggle(filter)
-          }).$e
-        );
-      }), $container;
-    }
-    /**
-     * Small button on the far side of the heading row (stats page):
-     * hides the buttons, so the listings are seen at once, and brings them back.
-     */
-    _renderToggler() {
-      this.$anchor.classList.add("listings-control-heading"), this.$toggle = document.createElement("button"), this.$toggle.type = "button", this.$toggle.className = "listings-control-toggle", this.$toggle.dataset.tip = "top", this.$toggleIcon = document.createElement("i"), this.$toggle.append(this.$toggleIcon), this.$toggle.addEventListener("click", (event) => {
-        event.preventDefault(), event.stopPropagation(), this._setCollapsed(this.onToggleCollapsed());
-      }), this.$anchor.append(this.$toggle), this._setCollapsed(this.getCollapsed());
-    }
-    _setCollapsed(collapsed) {
-      this.$controls.classList.toggle("hidden", collapsed), this.$toggleIcon.className = collapsed ? "fa fa-fw fa-eye" : "fa fa-fw fa-eye-slash", this.$toggle.title = collapsed ? "Show listings control" : "Hide listings control", this.$toggle.setAttribute("aria-expanded", String(!collapsed));
-    }
-  };
-
-  // src/features/ListingsControl/index.js
-  var ListingsControl = class {
-    constructor({
-      listings = [],
-      onAutoscroll = () => {
-      },
-      filters = listingFilters,
-      ui = {}
-    } = {}) {
-      this.listings = listings, this.onAutoscroll = onAutoscroll, this.filters = filters, this.ui = new ListingsControlUI({
-        buttons: this.filters,
-        getState: (filter) => this.isEnabled(filter),
-        getCount: (filter) => this.countHiddenListings(filter),
-        onToggle: (filter) => this.toggle(filter),
-        getCollapsed: () => this.isCollapsed(),
-        onToggleCollapsed: () => this.toggleCollapsed(),
-        ...ui
-      }), this._applyState();
-    }
-    /**
-     * How many listings of the page a toggle hides (0 for toggles that hide nothing).
-     */
-    countHiddenListings(filter) {
-      return filter.appliesTo ? this._getTargets(filter).length : 0;
-    }
-    isEnabled(filter) {
-      return !!gmStorage_default.get(filter.key, filter.defaultValue ?? !1);
-    }
-    toggle(filter) {
-      let enabled = gmStorage_default.toggle(filter.key, filter.defaultValue ?? !1);
-      return this._apply(filter, enabled), enabled;
-    }
-    /**
-     * Whether the buttons are folded away (stats page only: the toggler
-     * on the classifieds heading switches it, the classifieds panel is always open).
-     */
-    isCollapsed() {
-      return !!gmStorage_default.get(collapsedKey, !1);
-    }
-    toggleCollapsed() {
-      return gmStorage_default.toggle(collapsedKey, !1);
-    }
-    _applyState() {
-      this.filters.forEach((filter) => {
-        if (this.isEnabled(filter)) {
-          if (filter.isGlobal) {
-            whenPageReady(() => this._apply(filter, !0));
-            return;
-          }
-          this._apply(filter, !0);
-        }
-      });
-    }
-    _apply(filter, enabled) {
-      if (filter.isGlobal) {
-        enabled && this.onAutoscroll();
-        return;
-      }
-      this._getTargets(filter).forEach(
-        (listing) => filter.apply(listing, enabled)
-      );
-    }
-    _getTargets(filter) {
-      return filter.appliesTo ? this.listings.filter(filter.appliesTo) : this.listings;
-    }
-  };
-
-  // src/entities/listing/defineType.js
-  function defineListingType(listingData = {}) {
-    if (listingData.listing_price === "") return ListingType.MARKETPLACE;
-    let isBuyOrder = listingData.listing_intent === "buy";
-    return isBuyOrder && listingData.spell_1 ? ListingType.SPELL : isBuyOrder && (listingData.quality_elevated || listingData.effect_id && listingData.quality === "11") ? ListingType.STRANGE : ListingType.DEFAULT;
-  }
-
-  // src/entities/listing/defineAgeGroup.js
-  var dayInMs = 1440 * 60 * 1e3;
-  function defineAgeGroup(listedAt, now = Date.now()) {
-    let listedTimestamp = new Date(listedAt).getTime();
-    if (Number.isNaN(listedTimestamp)) return null;
-    if (now - listedTimestamp <= freshListingMaxAgeInDays * dayInMs)
-      return ListingAgeGroup.FRESH;
-    let staleThreshold = new Date(now);
-    return staleThreshold.setMonth(staleThreshold.getMonth() - staleListingMinAgeInMonths), listedTimestamp > staleThreshold.getTime() ? ListingAgeGroup.AGING : ListingAgeGroup.OLD;
-  }
-
-  // src/features/BlockedUsers/const.js
-  var blockedUsersStorageKey = "blockedUsers";
-
-  // src/features/BlockedUsers/index.js
-  var BlockedUsers = class _BlockedUsers {
-    static getAll() {
-      return gmStorage_default.get(blockedUsersStorageKey, []);
-    }
-    static isBlocked(userId) {
-      return _BlockedUsers.getAll().some((user) => user.id === userId);
-    }
-    static block(userName, userId) {
-      let blockedUsers = _BlockedUsers.getAll();
-      if (_BlockedUsers.isBlocked(userId)) return blockedUsers;
-      let nextBlockedUsers = [...blockedUsers, { userName, id: userId }];
-      return gmStorage_default.set(blockedUsersStorageKey, nextBlockedUsers);
-    }
-    static unblock(userId) {
-      let nextBlockedUsers = _BlockedUsers.getAll().filter(
-        (user) => user.id !== userId
-      );
-      return gmStorage_default.set(blockedUsersStorageKey, nextBlockedUsers);
-    }
-    static toggle(userName, userId) {
-      return _BlockedUsers.isBlocked(userId) ? _BlockedUsers.unblock(userId) : _BlockedUsers.block(userName, userId);
-    }
-  };
-
-  // src/features/UI/components/Button/index.js
-  function Button() {
-    let $b = document.createElement("button");
-    return $b.className = "btn btn-xs btn-secondary", $b;
-  }
-
-  // src/features/UI/components/BlockButton/BlockButton.js
-  function BlockButton({ blocked = !1, userName = "" } = {}) {
-    let $b = Button();
-    $b.classList.add("bcp-block-button");
-    let $icon = document.createElement("i");
-    return $icon.className = "fa fa-ban", $b.append($icon), $b.title = `${blocked ? "Unblock" : "Block"} ${userName}?`, $b;
-  }
-
-  // src/features/UI/listing/index.js
-  var sellerNameStylePattern = /^(?:awesome\d+|xmas|premium)$/, intentIconReplacements = {
-    "fa-arrow-left": "fa-angle-left",
-    "fa-arrow-right": "fa-angle-right"
-  };
-  function getCurrencyRank(pricePart) {
-    return /keys?/i.test(pricePart) ? 0 : /ref/i.test(pricePart) ? 1 : 2;
-  }
-  var ListingUI = class {
-    constructor(listing) {
-      this.listing = listing, this.type = defineListingType(listing.data), this.blocked = BlockedUsers.isBlocked(this.userId), this.isDeviantItem = !1, this.sellerNameStyleClass = this._findSellerNameStyleClass(), this._render();
-    }
-    get $e() {
-      return this.listing.$e;
-    }
-    get userId() {
-      return this.listing.data.listing_account_id;
-    }
-    get userName() {
-      return this.listing.data.listing_name;
-    }
-    get meta() {
-      return listingTypeMeta[this.type] ?? listingTypeMeta[ListingType.DEFAULT];
-    }
-    /**
-     * Listings of the same item share its definition, quality and effect.
-     * Page specific bits (offers url, promotion, ...) must not split the group.
-     */
-    get groupKey() {
-      let {
-        app = "",
-        defindex = "",
-        quality = "",
-        effect_id = ""
-      } = this.listing.data;
-      return [app, defindex, quality, effect_id].join("|");
-    }
-    /**
-     * The whole price split by currency: `["20 keys", "30 ref"]`.
-     * The site's tag shows a converted number instead of the real listing price.
-     */
-    get priceParts() {
-      let {
-        listing_price: listingPrice = "",
-        p_bptf: marketPrice = ""
-      } = this.listing.data;
-      return (listingPrice || marketPrice).split(/,\s+/).map((pricePart) => pricePart.trim()).filter(Boolean).sort((a, b) => getCurrencyRank(a) - getCurrencyRank(b));
-    }
-    truncateTheListing() {
-      this.$e.querySelector("p")?.classList.toggle("truncated");
-    }
-    /**
-     * Swaps the "bumped at" date for the "listed at" one (and back).
-     */
-    toggleListedTime() {
-      this.$e.classList.toggle("listed-time");
-    }
-    toggleVisibility() {
-      this.meta.hiddenClass && this.$e.classList.toggle(this.meta.hiddenClass);
-    }
-    toggleBlockedVisibility() {
-      this.$e.classList.toggle(blockedListingHiddenClass);
-    }
-    /**
-     * Compact view: icon, price, name, trade offer, date and seller.
-     * A deviant item keeps the accent, so the main listings stay quiet.
-     */
-    setCompactMode(enabled) {
-      this.$e.classList.toggle(compactListingClass, enabled), this.$e.classList.toggle(
-        compactListingDeviantClass,
-        enabled && this.isDeviantItem
-      );
-    }
-    /**
-     * Swaps the rounded site price ("20.46 keys") for the whole currency
-     * ("20 keys" over "30 ref") on the compact rows.
-     */
-    setFullCurrency(enabled) {
-      this.$e.classList.toggle(fullCurrencyListingClass, enabled);
-    }
-    /**
-     * Removes/restores the `awesomeN` class that gives the seller nickname its custom look.
-     */
-    toggleSellerNameStyle() {
-      let $userLink = this.$e.querySelector(".user-handle .user-link");
-      $userLink && (this.sellerNameStyleClass ??= this._findSellerNameStyleClass(), this.sellerNameStyleClass && $userLink.classList.toggle(this.sellerNameStyleClass));
-    }
-    /**
-     * Enables/disables the age coloring of both listing dates.
-     */
-    setAgeHighlight(enabled) {
-      this.ageHighlightClass ??= this._findAgeHighlightClass(), this.ageHighlightClass && this._getDateTimes().forEach(
-        ($time) => $time.classList.toggle(this.ageHighlightClass, enabled)
-      );
-    }
-    _render() {
-      this._rewriteDateCaptions(), this._removeOnlineIndicator(), this._replaceIntentIcons(), this.ageHighlightClass = this._findAgeHighlightClass(), this._makeStrangeNameClickable(), this._highlight(), this._renderBlockButton(), this._renderCompactPrice(), this._bindTruncation();
-    }
-    /**
-     * A compact row shows the price currency by currency, so keys and refined
-     * keep their own line and the numbers stay aligned.
-     */
-    _renderCompactPrice() {
-      if (this.$e.classList.contains(keysOnlyPriceListingClass)) return;
-      let priceParts = this.priceParts, $listingItem = this.$e.querySelector(".listing-item");
-      if (!priceParts.length || !$listingItem) return;
-      let $price = document.createElement("span");
-      $price.className = compactPriceClass, priceParts.forEach((pricePart) => {
-        let $row = document.createElement("span");
-        $row.className = `${compactPriceClass}-row`, $row.textContent = pricePart, $price.append($row);
-      }), this.$e.classList.add(compactPriceListingClass), $listingItem.append($price);
-    }
-    /**
-     * Both dates of the listing ("Bumped" and "Listed").
-     * A listing that was never bumped has a single date.
-     */
-    _getDateTimes() {
-      let $dateContainer = this.$e.querySelector(".click-data-toggle");
-      return $dateContainer ? [...$dateContainer.querySelectorAll("time[datetime]")] : [];
-    }
-    /**
-     * Both dates are colored by the age of the listing, so a recently bumped
-     * but old listing is still reported as an old one:
-     * 3 weeks or less - green, less than 2 months - yellow, older - dark red.
-     */
-    _findAgeHighlightClass() {
-      let $dateContainer = this.$e.querySelector(".click-data-toggle"), $listedTime = $dateContainer?.querySelector(".data2 time[datetime]") ?? $dateContainer?.querySelector("time[datetime]");
-      if (!$listedTime) return null;
-      let ageGroup = defineAgeGroup($listedTime.getAttribute("datetime"));
-      return ageGroup ? listingAgeClasses[ageGroup] : null;
-    }
-    /**
-     * Moves "Bumped"/"Listed" into the date titles and replaces them with icons,
-     * so the date itself gets the space of the label. The "by" separator goes away
-     * too - the dates and the nickname are placed on the opposite sides of the row.
-     */
-    _rewriteDateCaptions() {
-      let $dateContainer = this.$e.querySelector(".click-data-toggle");
-      $dateContainer && (Object.entries(listingDateMeta).forEach(([className, meta]) => {
-        this._rewriteDateCaption(
-          $dateContainer.querySelector(`.${className}`),
-          meta
-        );
-      }), this._removeCaptionText($dateContainer, "by"));
-    }
-    _rewriteDateCaption($container, { label, icon }) {
-      let $time = $container?.querySelector("time[datetime]");
-      if (!$time) return;
-      let $icon = document.createElement("i");
-      $icon.className = icon, $time.before($icon), $time.title = $time.title ? `${label}: ${$time.title}` : label, this._removeCaptionText($container, label);
-    }
-    /**
-     * Captions are plain text nodes next to the dates ("Bumped ", "Listed ", " by ").
-     */
-    _removeCaptionText($container, caption) {
-      [...$container.childNodes].filter(
-        ($node) => $node.nodeType === Node.TEXT_NODE && $node.textContent.includes(caption)
-      ).forEach(($node) => $node.remove());
-    }
-    /**
-     * The online/offline dot next to the seller nickname says nothing on a listing - it goes away.
-     */
-    _removeOnlineIndicator() {
-      this.$e.querySelectorAll(".user-handle .user-link .fa-circle, .user-handle .user-link .fa-circle-o").forEach(
-        ($dot) => $dot.remove()
-      );
-    }
-    /**
-     * Both intent variants (buying and selling) get the same angle arrow.
-     */
-    _replaceIntentIcons() {
-      this.$e.querySelectorAll(
-        ".listing-title i, .listing-intent-buy, .listing-intent-sell"
-      ).forEach(
-        ($icon) => Object.entries(intentIconReplacements).forEach(([from, to]) => {
-          $icon.classList.contains(from) && ($icon.classList.remove(from), $icon.classList.add(to));
-        })
-      );
-    }
-    _findSellerNameStyleClass() {
-      return (this.$e.querySelector(".user-handle .user-link")?.className ?? "").split(/\s+/).find((token) => sellerNameStylePattern.test(token)) ?? null;
-    }
-    _highlight() {
-      this.blocked && (this.$e.style.backgroundColor = blockedListingHighlight), this.meta.highlightColor && (this.$e.style.backgroundColor = this.meta.highlightColor);
-    }
-    _bindTruncation() {
-      this.$e.addEventListener("dblclick", () => this.truncateTheListing());
-    }
-    _renderBlockButton() {
-      let $container = this.$e.querySelector(".user-handle");
-      $container && (this.$blockButton = BlockButton({
-        blocked: this.blocked,
-        userName: this.userName
-      }), this.$blockButton.addEventListener(
-        "click",
-        () => this._toggleBlockState()
-      ), $container.append(this.$blockButton));
-    }
-    /**
-     * The native confirm is enough here - the old in-listing popup was one more
-     * absolutely positioned element that had to fight with the site layout.
-     */
-    _toggleBlockState() {
-      let action = this.blocked ? "Unblock" : "Block";
-      window.confirm(`${action} ${this.userName}?`) && (BlockedUsers.toggle(this.userName, this.userId), window.location.reload());
-    }
-    _makeStrangeNameClickable() {
-      if (this.type !== ListingType.STRANGE || this.listing.data.quality !== "5") return;
-      let $title = this.$e.querySelector(".listing-title");
-      if (!$title) return;
-      let { name = "", effect_id = "" } = this.listing.data;
-      $title.classList.add("clickable-name"), $title.title = "Redirect to Non-Strange unusual", $title.addEventListener("click", () => {
-        window.open(
-          `https://backpack.tf/stats/Unusual/${encodeURIComponent(name)}/Tradable/Craftable/${encodeURIComponent(effect_id)}`
-        );
-      });
-    }
-  };
-
-  // src/features/ListingsController/index.js
-  var ListingsController = class {
-    constructor(listings = Store.listings) {
-      this.listings = listings.map((listing) => new ListingUI(listing)), this._markDeviantItems();
-    }
-    /**
-     * The item of the first listing is the main one of the page, so listings of
-     * the same item stay quiet and the deviant ones are highlighted.
-     */
-    _markDeviantItems() {
-      let mainGroupKey = this.listings[0]?.groupKey;
-      this.listings.forEach((listing) => {
-        listing.isDeviantItem = listing.groupKey !== mainGroupKey;
-      });
-    }
-  };
-
-  // src/features/PageControl/index.js
-  var arrowKeysActions = {
-    ArrowLeft: "previous",
-    ArrowRight: "next"
-  }, listingsScrollOffset = 40, PageControl = class _PageControl {
-    constructor() {
-      [this.lastPage, this.currentPage] = _PageControl._getPaginationData(), this._setupKeyboardNavigation(), this._addSidebars();
-    }
-    static _getPaginationData() {
-      let $lastPageLink = document.querySelector(".pagination")?.lastElementChild?.querySelector("a"), url = new URL(window.location.href), currentPage = Number(url.searchParams.get("page")) || 1;
-      return [$lastPageLink && Number(
-        new URL($lastPageLink.href, window.location.origin).searchParams.get(
-          "page"
-        )
-      ) || currentPage, currentPage];
-    }
-    gotoPage(page) {
-      let url = new URL(window.location.href);
-      url.searchParams.set("page", page), window.location.href = url.toString();
-    }
-    goToNextPage() {
-      this.currentPage < this.lastPage && this.gotoPage(this.currentPage + 1);
-    }
-    goToPreviousPage() {
-      this.currentPage > 1 && this.gotoPage(this.currentPage - 1);
-    }
-    scrollToListings() {
-      let $firstListing = document.querySelector(".listing"), $listingsContainer = $firstListing?.closest(".row") ?? $firstListing?.parentElement;
-      if (!$listingsContainer) return;
-      let offset = $listingsContainer.getBoundingClientRect().top + window.pageYOffset - listingsScrollOffset;
-      window.scrollTo({ top: offset });
-    }
-    _setupKeyboardNavigation() {
-      window.addEventListener("keydown", (event) => {
-        if (!event.ctrlKey) return;
-        let action = arrowKeysActions[event.key];
-        action === "next" && this.goToNextPage(), action === "previous" && this.goToPreviousPage();
-      });
-    }
-    _addSidebars() {
-      let $pageContent = document.querySelector("#page-content");
-      $pageContent && $pageContent.append(
-        this._createSidebar("left-sidebar", "left", () => this.goToPreviousPage()),
-        this._createSidebar("right-sidebar", "right", () => this.goToNextPage())
-      );
-    }
-    _createSidebar(className, side, onClick) {
-      let $sidebar = document.createElement("div");
-      return $sidebar.classList.add("sidebar", className), $sidebar.style[side] = "0", $sidebar.addEventListener("click", onClick), $sidebar;
-    }
-  };
-
   // src/styles/common.js
   var common_default = `
 :root {
@@ -757,7 +42,7 @@
 h2 {
     user-select: none;
 }
-
+    
 `;
 
   // src/styles/backpackPage.js
@@ -1335,6 +620,139 @@ li.listing.compact-listing.compact-listing-deviant:hover {
     }
 }
 
+/*
+ * Listing type marker: a small icon next to the item name, like the STN.tf
+ * source icon - the old full-row background tints were too loud.
+ */
+.listing-title h5 .bcp-listing-type-icon {
+    display: inline-block;
+    margin-left: 4px;
+    color: #777;
+    font-size: 10px;
+    line-height: 1;
+    vertical-align: -1px;
+    opacity: 0.75;
+}
+
+.compact-listing .listing-title h5 .bcp-listing-type-icon {
+    font-size: 9px;
+}
+
+/*
+ * Quick edit of the user's own listings: inline form inside the listing body.
+ */
+.listing-buttons .bcp-quick-edit-button {
+    opacity: 0.55;
+    transition: opacity 0.15s ease;
+}
+
+.listing-buttons .bcp-quick-edit-button:hover,
+.listing-buttons .bcp-quick-edit-button.active {
+    opacity: 1;
+}
+
+.compact-listing .listing-buttons > button.bcp-quick-edit-button {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 1px solid rgba(0, 0, 0, 0.12) !important;
+    border-radius: 3px !important;
+    background: rgba(0, 0, 0, 0.04) !important;
+    color: inherit !important;
+    font-size: 11px;
+    line-height: 1;
+    box-shadow: none !important;
+    text-shadow: none !important;
+}
+
+.compact-listing .listing-buttons > button.bcp-quick-edit-button:hover {
+    background: rgba(89, 99, 106, 0.2) !important;
+    color: inherit !important;
+}
+
+.bcp-quick-edit-form {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 6px 0 2px;
+    padding: 8px;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.75);
+}
+
+.bcp-quick-edit-form[hidden] {
+    display: none !important;
+}
+
+.bcp-quick-edit-fields {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.bcp-quick-edit-currency {
+    flex: 0 0 120px;
+    width: 120px;
+    max-width: 100%;
+}
+
+.bcp-quick-edit-currency .input-group-addon {
+    padding: 4px 6px;
+    border-color: #c8c8c8;
+    background: #f2f2f2;
+    color: #555;
+    font-size: 11px;
+}
+
+.bcp-quick-edit-form .form-control {
+    height: 30px;
+    padding: 4px 6px;
+    border: 1px solid #c8c8c8;
+    border-radius: 3px;
+    background: #fff;
+    color: #333;
+    font-size: 12px;
+    box-shadow: none;
+}
+
+.bcp-quick-edit-form textarea.form-control {
+    height: auto;
+    min-height: 48px;
+    resize: vertical;
+}
+
+.bcp-quick-edit-form .form-control:focus {
+    border-color: #66afe9;
+    outline: 0;
+    box-shadow: 0 0 3px rgba(102, 175, 233, 0.45);
+}
+
+.bcp-quick-edit-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.bcp-quick-edit-status {
+    margin-left: auto;
+    font-size: 11px;
+}
+
+.bcp-quick-edit-saved,
+.compact-listing .listing-buttons > span.bcp-quick-edit-saved {
+    display: inline !important;
+    margin-left: 4px;
+    color: #4caf50;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
 /* STN.tf orders use the native listing styling; only the description is adjusted */
 .quote-box p.bcp-stn-description.truncated {
     width: auto;
@@ -1380,6 +798,243 @@ h5 .bcp-stn-icon {
 }
 `;
 
+  // src/styles/settings.js
+  var settings_default = `
+body.bcp-settings-open {
+    overflow: hidden !important;
+}
+
+.bcp-settings-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 3000;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 4vh 1rem;
+    overflow-y: auto;
+    background: rgba(0, 0, 0, 0.6);
+}
+
+.bcp-settings-panel {
+    width: min(760px, 100%);
+    margin: 0;
+    border: 1px solid #b8b8b8;
+    border-radius: 6px;
+    background: #fff;
+    box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
+    overflow: hidden;
+}
+
+.bcp-settings-panel .bcp-settings-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 15px;
+    border: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+    background: #374c5b;
+    color: #fff !important;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.bcp-settings-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.bcp-settings-close {
+    padding: 0 2px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font-size: 16px;
+    line-height: 1;
+    opacity: 0.65;
+    cursor: pointer;
+}
+
+.bcp-settings-close:hover,
+.bcp-settings-close:focus-visible {
+    opacity: 1;
+}
+
+.bcp-settings-panel .bcp-settings-body {
+    max-height: 70vh;
+    padding: 4px 18px 14px;
+    border: 0;
+    background: #fff;
+    overflow-y: auto;
+}
+
+.bcp-settings-section {
+    margin-top: 18px;
+}
+
+.bcp-settings-section:first-child {
+    margin-top: 8px;
+}
+
+.bcp-settings-section-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 6px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #e4e4e4;
+}
+
+.bcp-settings-section-title {
+    margin: 0;
+    color: #374c5b;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.bcp-settings-section-help {
+    margin: 0 0 6px;
+    color: #888;
+    font-size: 11px;
+}
+
+.bcp-settings-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 0;
+    padding: 6px 0;
+    border-bottom: 1px solid #f0f0f0;
+    font-weight: 400;
+    cursor: pointer;
+}
+
+.bcp-settings-row:last-child {
+    border-bottom: 0;
+}
+
+.bcp-settings-row input[type="checkbox"] {
+    flex: 0 0 auto;
+    margin: 2px 0 0;
+}
+
+.bcp-settings-row-text {
+    min-width: 0;
+}
+
+.bcp-settings-row-label {
+    display: block;
+    color: #333;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.bcp-keybinding-group {
+    margin-top: 10px;
+}
+
+.bcp-keybinding-group:first-child {
+    margin-top: 0;
+}
+
+.bcp-keybinding-group-title {
+    margin: 0 0 2px;
+    color: #777;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+}
+
+.bcp-keybinding-row {
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    cursor: default;
+}
+
+.bcp-keybinding-button {
+    flex: 0 0 auto;
+    min-width: 140px;
+    font-variant-numeric: tabular-nums;
+}
+
+.bcp-keybinding-button.bcp-keybinding-capturing {
+    border-color: #66afe9;
+    background: #eef7ff;
+    color: #374c5b;
+}
+
+.bcp-keybinding-status {
+    min-height: 16px;
+    margin: 6px 0 0;
+    color: #888;
+    font-size: 11px;
+}
+
+.bcp-keybinding-status.text-danger {
+    color: #c84b43;
+}
+
+.bcp-settings-panel .bcp-settings-note {
+    margin: 16px 0 0;
+    padding: 8px 10px;
+    border-left: 3px solid #374c5b;
+    background: #f5f7f8;
+    color: #666;
+    font-size: 11px;
+}
+
+.bcp-settings-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 15px;
+    border-top: 1px solid #d8d8d8;
+    background: #f4f4f4;
+}
+
+.bcp-settings-footer-note {
+    color: #888;
+    font-size: 11px;
+}
+
+.bcp-settings-panel .btn:focus-visible,
+.bcp-settings-close:focus-visible,
+.bcp-settings-row input:focus-visible {
+    outline: 2px solid #66afe9;
+    outline-offset: 1px;
+}
+
+@media (max-width: 700px) {
+    .bcp-settings-overlay {
+        padding: 0;
+    }
+
+    .bcp-settings-panel {
+        width: 100%;
+        border-radius: 0;
+    }
+
+    .bcp-settings-panel .bcp-settings-body {
+        max-height: calc(100vh - 110px);
+        padding: 4px 12px 12px;
+    }
+
+    .bcp-keybinding-row {
+        flex-wrap: wrap;
+    }
+
+    .bcp-keybinding-button {
+        min-width: 0;
+        width: 100%;
+    }
+}
+`;
+
   // src/styles/statsPage.js
   var statsPage_default = `
 .stats-settings-dropdown {
@@ -1404,7 +1059,7 @@ h5 .bcp-stn-icon {
 .stats-breadcrumb.dropdown>a,
 .stats-breadcrumb.dropdown>a:hover {
     text-decoration: none !important;
-    color: #333;
+    color: #333; 
 }
 
 @media (min-width: 960px) {
@@ -2092,6 +1747,1658 @@ body.bcp-hide-add-button .bcp-add-button {
   function injectBackpackPageStyles() {
     injectCommonStyles(), injectStyle(backpackPage_default, "bcp-backpack-page-styles");
   }
+  function injectSettingsStyles() {
+    injectStyle(settings_default, "bcp-settings-styles");
+  }
+
+  // src/utils/gmStorage.js
+  var memoryStorage = /* @__PURE__ */ new Map(), hasGMStorage = () => typeof GM_getValue == "function" && typeof GM_setValue == "function", GMStorage = {
+    get(key, fallback = null) {
+      if (!hasGMStorage())
+        return memoryStorage.has(key) ? memoryStorage.get(key) : fallback;
+      try {
+        return GM_getValue(key, fallback);
+      } catch (error) {
+        return console.error(`GMStorage: failed to read "${key}"`, error), fallback;
+      }
+    },
+    set(key, value) {
+      if (!hasGMStorage())
+        return memoryStorage.set(key, value), value;
+      try {
+        GM_setValue(key, value);
+      } catch (error) {
+        console.error(`GMStorage: failed to write "${key}"`, error);
+      }
+      return value;
+    },
+    toggle(key, fallback = !1) {
+      let nextValue = !GMStorage.get(key, fallback);
+      return GMStorage.set(key, nextValue);
+    }
+  }, gmStorage_default = GMStorage;
+
+  // src/utils/settingsEvents.js
+  var settingsChangedEvent = "bcp:settings-changed";
+  function emitSettingsChange(key, value) {
+    window.dispatchEvent(
+      new CustomEvent(settingsChangedEvent, {
+        detail: { key, value }
+      })
+    );
+  }
+
+  // src/entities/listing/const.js
+  var ListingType = Object.freeze({
+    DEFAULT: "default",
+    MARKETPLACE: "marketplace",
+    SPELL: "spell",
+    STRANGE: "strange"
+  }), listingTypeMeta = {
+    [ListingType.DEFAULT]: {},
+    [ListingType.MARKETPLACE]: {
+      hiddenClass: "marketplace-hidden",
+      badge: { iconClass: "fa fa-shopping-cart", label: "Marketplace" }
+    },
+    [ListingType.SPELL]: {
+      hiddenClass: "spell-hidden",
+      badge: { iconClass: "fa fa-magic", label: "Spell" }
+    },
+    [ListingType.STRANGE]: {
+      hiddenClass: "strange-hidden",
+      badge: { iconClass: "fa fa-star", label: "Strange unusual" }
+    }
+  }, blockedListingHighlight = "rgba(0,0,0,.1)", blockedListingHiddenClass = "blocked-listing", compactListingClass = "compact-listing", compactListingDeviantClass = "compact-listing-deviant", compactPriceClass = "bcp-compact-price", compactPriceListingClass = "has-compact-price", fullCurrencyListingClass = "full-currency", keysOnlyPriceListingClass = "keys-only-price", ListingAgeGroup = Object.freeze({
+    FRESH: "fresh",
+    AGING: "aging",
+    OLD: "old"
+  }), listingAgeClasses = Object.freeze({
+    [ListingAgeGroup.FRESH]: "listing-age-fresh",
+    [ListingAgeGroup.AGING]: "listing-age-aging",
+    [ListingAgeGroup.OLD]: "listing-age-old"
+  }), listingDateMeta = Object.freeze({
+    data1: { label: "Bumped", icon: "fa fa-angle-up" },
+    data2: { label: "Listed", icon: "fa fa-calendar-o" }
+  }), freshListingMaxAgeInDays = 21, staleListingMinAgeInMonths = 2;
+
+  // src/features/ListingsControl/const.js
+  var panelAnchorSelector = ".row", panelHtml = `
+    <div class="panel panel-main">
+        <div class="panel-heading">Listings control</div>
+        <div class="panel-body padded"></div>
+    </div>
+`, collapsedKey = "stats_listings_control_collapsed", hideColors = { off: "#628c2a", on: "#c84b43" }, enableColors = { off: "#59636a", on: "#278094" }, listingFilters = [
+    {
+      key: "mp_listings",
+      label: "Marketplace",
+      settingsLabel: "Hide Marketplace listings",
+      colors: hideColors,
+      appliesTo: (listing) => listing.type === ListingType.MARKETPLACE,
+      apply: (listing, enabled) => listing.toggleVisibility(enabled)
+    },
+    {
+      key: "spells",
+      label: "Spells",
+      settingsLabel: "Hide spell buy orders",
+      colors: hideColors,
+      classifiedsOnly: !0,
+      appliesTo: (listing) => listing.type === ListingType.SPELL,
+      apply: (listing, enabled) => listing.toggleVisibility(enabled)
+    },
+    {
+      key: "strange_unusuals",
+      label: "Strange unusuals",
+      settingsLabel: "Hide strange unusual buy orders",
+      colors: hideColors,
+      classifiedsOnly: !0,
+      appliesTo: (listing) => listing.type === ListingType.STRANGE,
+      apply: (listing, enabled) => listing.toggleVisibility(enabled)
+    },
+    {
+      key: "blocked_users",
+      label: "Blocked",
+      settingsLabel: "Hide blocked users",
+      colors: hideColors,
+      defaultValue: !0,
+      appliesTo: (listing) => listing.blocked,
+      apply: (listing, enabled) => listing.toggleBlockedVisibility(enabled)
+    },
+    {
+      key: "truncating",
+      label: "Truncate",
+      settingsLabel: "Truncate long messages",
+      colors: enableColors,
+      apply: (listing, enabled) => listing.truncateTheListing(enabled)
+    },
+    {
+      key: "compact_listings",
+      label: "Compact view",
+      colors: enableColors,
+      defaultValue: !1,
+      apply: (listing, enabled) => listing.setCompactMode(enabled)
+    },
+    {
+      key: "full_currency",
+      label: "Full currency",
+      settingsLabel: "Full currency (keys + ref)",
+      colors: enableColors,
+      defaultValue: !0,
+      apply: (listing, enabled) => listing.setFullCurrency(enabled)
+    },
+    {
+      key: "plain_nicknames",
+      label: "Plain nicknames",
+      colors: enableColors,
+      apply: (listing, enabled) => listing.toggleSellerNameStyle(enabled)
+    },
+    {
+      key: "bump_to_listed",
+      label: "Bump to listed",
+      settingsLabel: "Show listed date instead of bump",
+      colors: enableColors,
+      apply: (listing, enabled) => listing.toggleListedTime(enabled)
+    },
+    {
+      key: "date_highlight",
+      label: "Date highlight",
+      settingsLabel: "Date highlight by age",
+      colors: enableColors,
+      defaultValue: !0,
+      apply: (listing, enabled) => listing.setAgeHighlight(enabled)
+    },
+    {
+      key: "autoscroll",
+      label: "Autoscroll",
+      settingsLabel: "Autoscroll to listings",
+      colors: enableColors,
+      isGlobal: !0
+    }
+  ];
+
+  // src/features/KeyBindings/index.js
+  var storageKey = "bcp_keybindings", modifierKeys = /* @__PURE__ */ new Set(["Control", "Shift", "Alt", "Meta"]), navigationKeybindingActions = [
+    {
+      id: "previous",
+      label: "Previous page",
+      defaultBinding: {
+        key: "ArrowLeft",
+        ctrl: !0,
+        alt: !1,
+        shift: !1,
+        meta: !1
+      }
+    },
+    {
+      id: "next",
+      label: "Next page",
+      defaultBinding: {
+        key: "ArrowRight",
+        ctrl: !0,
+        alt: !1,
+        shift: !1,
+        meta: !1
+      }
+    }
+  ], listingKeybindingActions = listingFilters.filter((filter) => !filter.isGlobal).map((filter) => ({
+    id: `listing:${filter.key}`,
+    label: filter.settingsLabel ?? filter.label,
+    filterKey: filter.key,
+    defaultBinding: null
+  })), keybindingActions = [
+    ...navigationKeybindingActions,
+    ...listingKeybindingActions
+  ], cloneBinding = (binding) => binding ? { ...binding } : null;
+  function normalizeKey(key = "") {
+    return key === " " ? "Space" : key.length === 1 ? key.toLowerCase() : key;
+  }
+  function eventToBinding(event) {
+    return !event?.key || modifierKeys.has(event.key) ? null : {
+      key: normalizeKey(event.key),
+      ctrl: !!event.ctrlKey,
+      alt: !!event.altKey,
+      shift: !!event.shiftKey,
+      meta: !!event.metaKey
+    };
+  }
+  function isBindingAllowed(binding) {
+    return typeof binding?.key == "string" && binding.key.length > 0 && !!(binding.ctrl || binding.alt || binding.meta);
+  }
+  function bindingsEqual(a, b) {
+    return !a || !b ? !1 : a.key === b.key && !!a?.ctrl == !!b?.ctrl && !!a?.alt == !!b?.alt && !!a?.shift == !!b?.shift && !!a?.meta == !!b?.meta;
+  }
+  function matchesBinding(event, binding) {
+    return binding?.key ? normalizeKey(event.key) === binding.key && !!event.ctrlKey == !!binding.ctrl && !!event.altKey == !!binding.alt && !!event.shiftKey == !!binding.shift && !!event.metaKey == !!binding.meta : !1;
+  }
+  function getKeybindings() {
+    let stored = gmStorage_default.get(storageKey, null);
+    return Object.fromEntries(
+      keybindingActions.map(({ id, defaultBinding }) => {
+        let binding = !!(stored && Object.prototype.hasOwnProperty.call(stored, id)) ? isBindingAllowed(stored[id]) ? stored[id] : null : defaultBinding;
+        return [id, cloneBinding(binding)];
+      })
+    );
+  }
+  function saveKeybinding(id, binding) {
+    let bindings = getKeybindings();
+    return bindings[id] = cloneBinding(binding), gmStorage_default.set(storageKey, bindings), bindings;
+  }
+  function resetKeybindings() {
+    let bindings = Object.fromEntries(
+      keybindingActions.map(({ id, defaultBinding }) => [
+        id,
+        cloneBinding(defaultBinding)
+      ])
+    );
+    return gmStorage_default.set(storageKey, bindings), bindings;
+  }
+  var keyLabels = {
+    ArrowLeft: "\u2190",
+    ArrowRight: "\u2192",
+    ArrowUp: "\u2191",
+    ArrowDown: "\u2193",
+    Space: "Space",
+    Escape: "Esc",
+    PageUp: "PgUp",
+    PageDown: "PgDn",
+    Delete: "Del"
+  };
+  function formatBinding(binding) {
+    if (!binding?.key) return "Not set";
+    let parts = [];
+    return binding.ctrl && parts.push("Ctrl"), binding.alt && parts.push("Alt"), binding.shift && parts.push("Shift"), binding.meta && parts.push("Meta"), parts.push(
+      keyLabels[binding.key] ?? (binding.key.length === 1 ? binding.key.toUpperCase() : binding.key)
+    ), parts.join(" + ");
+  }
+  function isEditableTarget(target) {
+    return target instanceof Element ? target.isContentEditable || !!target.closest(
+      "input, textarea, select, [contenteditable='true'], [contenteditable='']"
+    ) : !1;
+  }
+
+  // src/features/PageControl/const.js
+  var sidebarSettings = [
+    {
+      key: "bcp_sidebar_left",
+      side: "left",
+      label: "Left sidebar (previous page)"
+    },
+    {
+      key: "bcp_sidebar_right",
+      side: "right",
+      label: "Right sidebar (next page)"
+    }
+  ];
+
+  // src/features/StatsModulesController/const.js
+  var statModules = [
+    {
+      moduleName: "Item Instances Graph",
+      positionKey: "itemInstancesGraphPos",
+      defaultPosition: 0,
+      hideKey: "Item_Instances_Graph",
+      elements: ($statsBody) => [
+        $statsBody.querySelectorAll(".guttered")[0],
+        $statsBody.querySelector(".well")
+      ]
+    },
+    {
+      moduleName: "Paint Distribution",
+      positionKey: "paintDistributionGraphPos",
+      defaultPosition: 1,
+      hideKey: "Paint_Distribution"
+    },
+    {
+      moduleName: "Level Distribution",
+      positionKey: "levelDistributionGraphPos",
+      defaultPosition: 2,
+      hideKey: "Level_Distribution"
+    },
+    {
+      moduleName: "Strange Parts",
+      positionKey: "strangeDistributionGraphPos",
+      defaultPosition: 3,
+      hideKey: "Strange_Parts"
+    },
+    {
+      moduleName: "classifieds",
+      positionKey: "classifiedsPos",
+      defaultPosition: 4,
+      elements: ($statsBody) => {
+        let $header = $statsBody.querySelector("h2#classifieds");
+        return [$header, $header?.nextElementSibling];
+      }
+    },
+    {
+      moduleName: "Suggestions",
+      positionKey: "suggestionsPos",
+      defaultPosition: 5,
+      elements: ($statsBody) => {
+        let $headers = $statsBody.querySelectorAll("h2");
+        return [$headers[$headers.length - 1], $statsBody.querySelectorAll(".row")[1]];
+      }
+    }
+  ], amountHeaderIndex = 2, collapseModulesKey = "stats_modules_collapsed", statsFeatureToggles = [
+    {
+      label: "Sell your item",
+      key: "stats_quick_list_hidden",
+      className: "bcp-hide-quick-list"
+    },
+    {
+      label: "Add button",
+      key: "stats_add_button_hidden",
+      className: "bcp-hide-add-button"
+    }
+  ];
+
+  // src/features/StatsLinks/const.js
+  var marketplaceSiteName = "Marketplace.tf", manncoSiteName = "Mannco.store", sites = [
+    {
+      baseLink: "https://marketplace.tf/items/tf2/",
+      siteName: marketplaceSiteName,
+      siteIcon: "/images/marketplace-medium.png?v=2"
+    },
+    {
+      baseLink: "https://mannco.store/item/440-",
+      siteName: manncoSiteName,
+      iconClass: "fa fa-money"
+    },
+    {
+      baseLink: "https://stntrading.eu/item/tf2/Unusual+",
+      siteName: "STN.tf",
+      siteIcon: "https://stntrading.eu/assets/img/logos/icon.svg"
+    },
+    {
+      baseLink: "https://gladiator.tf/sales?item=",
+      siteName: "Gladiator.tf",
+      inSideColumn: !0,
+      siteIcon: "data:image/png;base64,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"
+    },
+    {
+      baseLink: "https://next.backpack.tf/classifieds/snapshots/",
+      siteName: "Next snapshots",
+      iconClass: "fa fa-camera",
+      inSideColumn: !0
+    },
+    {
+      baseLink: "https://archivist.tf/history?item=",
+      siteName: "Archivist.tf",
+      iconClass: "fa fa-archive",
+      inSideColumn: !0
+    }
+  ], siteLinkHiddenKey = (siteName) => `hide_site_link_${siteName}`;
+
+  // src/features/SettingsPanel/index.js
+  var panelTitleId = "bcp-settings-title", createElement = (tag, className = "", text = "") => {
+    let $element = document.createElement(tag);
+    return className && ($element.className = className), text && ($element.textContent = text), $element;
+  }, read = (key, fallback = !1) => !!gmStorage_default.get(key, fallback), write = (key, value) => {
+    gmStorage_default.set(key, value), emitSettingsChange(key, value);
+  }, SettingsPanel = class _SettingsPanel {
+    static open(options = {}) {
+      return document.querySelector(".bcp-settings-overlay") ? null : new _SettingsPanel(options);
+    }
+    constructor({ returnFocus = null } = {}) {
+      this.returnFocus = returnFocus ?? document.activeElement, this.$overlay = null, this.capturing = null, this.keybindings = getKeybindings(), this._handleKeydown = (event) => this._onKeydown(event), this._render();
+    }
+    _render() {
+      this.$overlay = createElement("div", "bcp-settings-overlay"), this.$overlay.addEventListener("click", (event) => {
+        event.target === this.$overlay && this.close();
+      }), this.$panel = createElement(
+        "div",
+        "panel panel-main bcp-settings-panel"
+      ), this.$panel.id = "bcp-settings-panel", this.$panel.setAttribute("role", "dialog"), this.$panel.setAttribute("aria-modal", "true"), this.$panel.setAttribute("aria-labelledby", panelTitleId), this.$panel.append(
+        this._createHeader(),
+        this._createBody(),
+        this._createFooter()
+      ), this.$overlay.append(this.$panel), document.body.append(this.$overlay), document.body.classList.add("bcp-settings-open"), document.addEventListener("keydown", this._handleKeydown, !0), this.$closeButton.focus();
+    }
+    _createHeader() {
+      let $header = createElement(
+        "div",
+        "panel-heading bcp-settings-heading"
+      ), $title = createElement("span", "bcp-settings-title");
+      return $title.id = panelTitleId, $title.append(
+        createElement("i", "fa fa-cogs"),
+        document.createTextNode(" BPC+ Settings")
+      ), this.$closeButton = createElement("button", "bcp-settings-close"), this.$closeButton.type = "button", this.$closeButton.title = "Close settings", this.$closeButton.setAttribute("aria-label", "Close settings"), this.$closeButton.append(createElement("i", "fa fa-times")), this.$closeButton.addEventListener("click", () => this.close()), $header.append($title, this.$closeButton), $header;
+    }
+    _createBody() {
+      let $body = createElement("div", "panel-body bcp-settings-body");
+      return $body.append(
+        this._createNavigationSection(),
+        this._createKeybindingsSection(),
+        this._createListingsSection(),
+        this._createStatsSection(),
+        this._createSiteLinksSection(),
+        this._createNote()
+      ), $body;
+    }
+    _createSection(title, help = "") {
+      let $section = createElement("section", "bcp-settings-section"), $heading = createElement("div", "bcp-settings-section-heading"), $title = createElement("h4", "bcp-settings-section-title", title);
+      $heading.append($title);
+      let $rows = createElement("div", "bcp-settings-rows");
+      return $section.append($heading), help && $section.append(createElement("p", "bcp-settings-section-help", help)), $section.append($rows), { $section, $heading, $rows };
+    }
+    _createNavigationSection() {
+      let { $rows } = this._createSection(
+        "Page navigation",
+        "Clickable sidebars for the previous and next classifieds page."
+      );
+      return sidebarSettings.forEach(({ key, label }) => {
+        $rows.append(
+          this._createToggleRow({
+            label,
+            checked: read(key, !0),
+            onChange: (checked) => write(key, checked)
+          })
+        );
+      }), $rows.parentElement;
+    }
+    _createKeybindingsSection() {
+      let { $section, $heading } = this._createSection(
+        "Key bindings",
+        "Click a shortcut, then press the new combination. Ctrl, Alt or Meta is required. Backspace clears a shortcut."
+      ), $reset = createElement(
+        "button",
+        "btn btn-default btn-xs bcp-settings-reset",
+        "Reset"
+      );
+      return $reset.type = "button", $reset.addEventListener("click", () => this._resetKeybindings()), $heading.append($reset), this.keybindingButtons = /* @__PURE__ */ new Map(), $section.append(
+        this._createKeybindingGroup(
+          "Page navigation",
+          navigationKeybindingActions
+        ),
+        this._createKeybindingGroup(
+          "Listing toggles",
+          listingKeybindingActions
+        )
+      ), this.$keybindingStatus = createElement(
+        "p",
+        "bcp-keybinding-status"
+      ), this.$keybindingStatus.setAttribute("role", "status"), this.$keybindingStatus.setAttribute("aria-live", "polite"), $section.append(this.$keybindingStatus), $section;
+    }
+    _createKeybindingGroup(title, actions) {
+      let $group = createElement("div", "bcp-keybinding-group");
+      $group.append(createElement("h5", "bcp-keybinding-group-title", title));
+      let $rows = createElement("div", "bcp-keybinding-rows");
+      return actions.forEach(
+        (action) => $rows.append(this._createKeybindingRow(action))
+      ), $group.append($rows), $group;
+    }
+    _createKeybindingRow(action) {
+      let $row = createElement(
+        "div",
+        "bcp-settings-row bcp-keybinding-row"
+      ), $label = createElement(
+        "span",
+        "bcp-settings-row-label",
+        action.label
+      ), $button = createElement(
+        "button",
+        "btn btn-default btn-xs bcp-keybinding-button",
+        formatBinding(this.keybindings[action.id])
+      );
+      return $button.type = "button", $button.title = `Change the ${action.label.toLowerCase()} shortcut`, $button.addEventListener(
+        "click",
+        () => this._startCapture(action.id, $button)
+      ), this.keybindingButtons.set(action.id, $button), $row.append($label, $button), $row;
+    }
+    _createListingsSection() {
+      let { $rows } = this._createSection(
+        "Classifieds",
+        "Toggles from the Listings control panel."
+      );
+      return listingFilters.forEach((filter) => {
+        $rows.append(
+          this._createToggleRow({
+            label: filter.settingsLabel ?? filter.label,
+            checked: read(filter.key, filter.defaultValue ?? !1),
+            onChange: (checked) => write(filter.key, checked)
+          })
+        );
+      }), $rows.parentElement;
+    }
+    _createStatsSection() {
+      let { $rows } = this._createSection(
+        "Stats page",
+        "Modules and panels on item stats pages."
+      );
+      return $rows.append(
+        this._createToggleRow({
+          label: "Collapse modules by default",
+          checked: read(collapseModulesKey, !1),
+          onChange: (checked) => write(collapseModulesKey, checked)
+        })
+      ), statModules.filter((module) => module.hideKey).forEach((module) => {
+        let hidden = read(module.hideKey, !1);
+        $rows.append(
+          this._createToggleRow({
+            label: module.moduleName,
+            checked: !hidden,
+            onChange: (visible) => write(module.hideKey, !visible)
+          })
+        );
+      }), statsFeatureToggles.forEach((feature) => {
+        let hidden = read(feature.key, !1);
+        $rows.append(
+          this._createToggleRow({
+            label: feature.label,
+            checked: !hidden,
+            onChange: (visible) => write(feature.key, !visible)
+          })
+        );
+      }), $rows.parentElement;
+    }
+    _createSiteLinksSection() {
+      let { $rows } = this._createSection(
+        "Site buttons",
+        "View-on-site buttons on stats pages."
+      );
+      return sites.forEach((site) => {
+        let key = siteLinkHiddenKey(site.siteName), hidden = read(key, !1);
+        $rows.append(
+          this._createToggleRow({
+            label: site.siteName,
+            checked: !hidden,
+            onChange: (visible) => write(key, !visible)
+          })
+        );
+      }), $rows.parentElement;
+    }
+    _createToggleRow({ label, checked, onChange }) {
+      let $row = createElement("label", "bcp-settings-row"), $input = document.createElement("input");
+      $input.type = "checkbox", $input.checked = checked, $input.addEventListener("change", () => onChange($input.checked));
+      let $text = createElement("span", "bcp-settings-row-text");
+      return $text.append(createElement("span", "bcp-settings-row-label", label)), $row.append($input, $text), $row;
+    }
+    _createNote() {
+      return createElement(
+        "p",
+        "bcp-settings-note",
+        "Custom site buttons are still managed from the Add button tile on an item stats page."
+      );
+    }
+    _createFooter() {
+      let $footer = createElement("div", "bcp-settings-footer"), $note = createElement(
+        "span",
+        "bcp-settings-footer-note",
+        "Changes are saved automatically."
+      ), $done = createElement(
+        "button",
+        "btn btn-primary btn-sm",
+        "Done"
+      );
+      return $done.type = "button", $done.addEventListener("click", () => this.close()), $footer.append($note, $done), $footer;
+    }
+    _startCapture(actionId, $button) {
+      this.capturing && this._cancelCapture();
+      let action = keybindingActions.find((entry) => entry.id === actionId);
+      action && (this.capturing = { actionId, $button }, $button.textContent = "Press keys\u2026", $button.classList.add("bcp-keybinding-capturing"), this._setKeybindingStatus(
+        `Press the new shortcut for ${action.label.toLowerCase()}. Esc cancels.`
+      ), $button.focus());
+    }
+    _clearBinding(actionId) {
+      this.keybindings = saveKeybinding(actionId, null);
+      let { $button } = this.capturing;
+      $button.textContent = formatBinding(null), $button.classList.remove("bcp-keybinding-capturing"), this.capturing = null, this._setKeybindingStatus("Shortcut cleared.");
+    }
+    _cancelCapture(message = "Cancelled.") {
+      if (!this.capturing) return;
+      let { actionId, $button } = this.capturing;
+      $button.textContent = formatBinding(this.keybindings[actionId]), $button.classList.remove("bcp-keybinding-capturing"), this.capturing = null, this._setKeybindingStatus(message);
+    }
+    _onKeydown(event) {
+      if (this.capturing) {
+        if (event.preventDefault(), event.stopPropagation(), event.key === "Escape") {
+          this._cancelCapture();
+          return;
+        }
+        if ((event.key === "Backspace" || event.key === "Delete") && !event.ctrlKey && !event.altKey && !event.metaKey) {
+          this._clearBinding(this.capturing.actionId);
+          return;
+        }
+        let binding = eventToBinding(event);
+        if (!binding) return;
+        if (!isBindingAllowed(binding)) {
+          this._setKeybindingStatus(
+            "Add Ctrl, Alt or Meta to the combination.",
+            !0
+          );
+          return;
+        }
+        let { actionId } = this.capturing, conflict = keybindingActions.find(
+          (action2) => action2.id !== actionId && bindingsEqual(this.keybindings[action2.id], binding)
+        );
+        if (conflict) {
+          this._setKeybindingStatus(
+            `Already used by ${conflict.label.toLowerCase()}.`,
+            !0
+          );
+          return;
+        }
+        this.keybindings = saveKeybinding(actionId, binding);
+        let { $button } = this.capturing;
+        $button.textContent = formatBinding(binding), $button.classList.remove("bcp-keybinding-capturing"), this.capturing = null;
+        let action = keybindingActions.find(
+          (entry) => entry.id === actionId
+        );
+        this._setKeybindingStatus(
+          `${action.label} set to ${formatBinding(binding)}.`
+        );
+        return;
+      }
+      if (event.stopPropagation(), event.key === "Escape") {
+        event.preventDefault(), this.close();
+        return;
+      }
+      event.key === "Tab" && this._trapFocus(event);
+    }
+    _trapFocus(event) {
+      let $focusable = [...this.$panel.querySelectorAll(
+        'button:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
+      )].filter(($element) => $element.offsetParent !== null);
+      if (!$focusable.length) return;
+      let first = $focusable[0], last = $focusable[$focusable.length - 1];
+      event.shiftKey && document.activeElement === first ? (event.preventDefault(), last.focus()) : !event.shiftKey && document.activeElement === last && (event.preventDefault(), first.focus());
+    }
+    _resetKeybindings() {
+      this.keybindings = resetKeybindings(), this.keybindingButtons.forEach(($button, actionId) => {
+        $button.textContent = formatBinding(this.keybindings[actionId]), $button.classList.remove("bcp-keybinding-capturing");
+      }), this.capturing = null, this._setKeybindingStatus("Key bindings reset.");
+    }
+    _setKeybindingStatus(message, isError = !1) {
+      this.$keybindingStatus && (this.$keybindingStatus.textContent = message, this.$keybindingStatus.classList.toggle("text-danger", isError));
+    }
+    close() {
+      this.capturing && this._cancelCapture(""), document.removeEventListener("keydown", this._handleKeydown, !0), this.$overlay?.remove(), document.body.classList.remove("bcp-settings-open"), this.returnFocus instanceof HTMLElement && this.returnFocus.focus();
+    }
+  };
+
+  // src/features/NavigationMenu/index.js
+  var dropdownSelector = ".navbar-user-dropdown .dropdown-menu", missingLinks = [
+    { name: "Calculator", link: "/calculator", iconClass: "fa-calculator" },
+    { name: "Issues", link: "/issues", iconClass: "fa-flag" }
+  ], NavigationMenu = class {
+    init() {
+      injectSettingsStyles(), this.$dropdown = document.querySelector(dropdownSelector), this.$dropdown && (this._addMissingLinks(), this._addSettingsLink());
+    }
+    _addMissingLinks() {
+      missingLinks.forEach(({ name, link, iconClass }) => {
+        this.$dropdown.querySelector(`a[href="${link}"]`) || this._insertBeforeSettings(
+          this._createItem(name, link, iconClass).$li
+        );
+      });
+    }
+    _addSettingsLink() {
+      if (this.$dropdown.querySelector(".bcp-settings-link")) return;
+      let { $li, $link } = this._createItem(
+        "BPC+ Settings",
+        "#",
+        "fa-cogs",
+        "bcp-settings-link"
+      );
+      $link.addEventListener("click", (event) => {
+        event.preventDefault(), event.stopPropagation(), this.$dropdown.closest(".dropdown")?.classList.remove("open"), SettingsPanel.open({ returnFocus: $link });
+      }), this._insertBeforeSettings($li);
+    }
+    _createItem(name, href, iconClass, className = "") {
+      let $li = document.createElement("li"), $link = document.createElement("a");
+      $link.href = href, className && ($link.className = className);
+      let $icon = document.createElement("i");
+      return $icon.className = `fa fa-fw ${iconClass}`, $link.append($icon, document.createTextNode(` ${name}`)), $li.append($link), { $li, $link };
+    }
+    _insertBeforeSettings($element) {
+      let $settings = [...this.$dropdown.children].find(
+        ($child) => $child.querySelector('a[href="/settings"]')
+      );
+      $settings ? $settings.before($element) : this.$dropdown.append($element);
+    }
+  };
+
+  // src/entities/item/index.js
+  var Item = class {
+    constructor(element) {
+      this.$e = element, this._fromElement();
+    }
+    /**
+     * Raw `data-*` attributes of the item element (`listing_price`, `effect_id`, ...).
+     */
+    get data() {
+      return this.$e.dataset;
+    }
+    _fromElement() {
+      Object.entries(this.$e.dataset).forEach(([k, v]) => {
+        k !== "data" && (this[k] = v);
+      });
+    }
+  };
+
+  // src/entities/user/index.js
+  var User = class {
+    constructor(element) {
+      this.$e = element, this._fromElement();
+    }
+    _fromElement() {
+      Object.entries(this.$e.dataset).forEach(([k, v]) => this[k] = v);
+    }
+  };
+
+  // src/entities/listing/index.js
+  var Listing = class {
+    constructor(element) {
+      this.$e = element, this._getFullData();
+    }
+    /**
+     * Listing data lives on the nested `.item` element.
+     */
+    get data() {
+      return this.item?.data ?? {};
+    }
+    _getFullData() {
+      this._getUser(), this._getItem();
+    }
+    _getItem() {
+      let $item = this.$e.querySelector(".item");
+      this.item = $item ? new Item($item) : null;
+    }
+    _getUser() {
+      let $user = this.$e.querySelector(".user-link");
+      this.user = $user ? new User($user) : null;
+    }
+  };
+
+  // src/store/index.js
+  var Store = {
+    items: [],
+    listings: [],
+    users: []
+  };
+
+  // src/features/EntitiesController/index.js
+  var EntitiesController = class {
+    constructor($root = document) {
+      this.store = Store, this.$root = $root, this._loadPageEntities(), console.log(this.store);
+    }
+    _loadPageEntities() {
+      this.store.users = [...this.$root.querySelectorAll(".user-handle a")].map(
+        (e) => new User(e)
+      ), this.store.items = [...this.$root.querySelectorAll(".item")].map(
+        (e) => new Item(e)
+      ), this.store.listings = [...this.$root.querySelectorAll(".listing")].map(
+        ($e) => new Listing($e)
+      );
+    }
+  };
+
+  // src/utils/whenPageReady.js
+  function whenPageReady(callback) {
+    let run = () => requestAnimationFrame(() => requestAnimationFrame(callback));
+    document.readyState === "complete" ? run() : window.addEventListener("load", run, { once: !0 });
+  }
+
+  // src/features/UI/components/ToggleControlButton/index.js
+  var ToggleControlButton = class {
+    constructor({
+      label = "",
+      colors = { off: "", on: "" },
+      active = !1,
+      count = 0,
+      onClick = () => active
+    } = {}) {
+      this.colors = colors, this.onClick = onClick, this.active = active, this.count = count, this.$e = document.createElement("button"), this.$e.className = "btn toggle-control-button", this.$e.innerText = label, this.$e.style.color = "white", this.$badge = document.createElement("span"), this.$badge.className = "toggle-control-badge", this.$e.addEventListener("click", () => {
+        this.active = !!this.onClick(), this._render();
+      }), this.$e.append(this.$badge), this._render();
+    }
+    setState(active, count = this.count) {
+      this.active = !!active, this.count = count, this._render();
+    }
+    _render() {
+      this.$e.style.backgroundColor = this.active ? this.colors.on : this.colors.off, this.$e.setAttribute("aria-pressed", String(this.active)), this.$badge.textContent = String(this.count), this.$badge.classList.toggle("hidden", !this._shouldShowBadge());
+    }
+    _shouldShowBadge() {
+      return this.active && this.count > 0;
+    }
+  };
+
+  // src/features/UI/listingsControl/index.js
+  var ListingsControlUI = class {
+    constructor({
+      buttons = [],
+      getState = () => !1,
+      getCount = () => 0,
+      onToggle = () => !1,
+      getCollapsed = () => !1,
+      onToggleCollapsed = () => !1,
+      $anchor = null,
+      withPanel = !0,
+      withToggler = !1
+    } = {}) {
+      this.buttons = buttons, this.toggleButtons = /* @__PURE__ */ new Map(), this.getState = getState, this.getCount = getCount, this.onToggle = onToggle, this.getCollapsed = getCollapsed, this.onToggleCollapsed = onToggleCollapsed, this.$anchor = $anchor ?? document.querySelector(panelAnchorSelector), this.withPanel = withPanel, this.withToggler = withToggler, this._create();
+    }
+    _create() {
+      if (!this.$anchor) return;
+      let $host = this.withPanel ? this._createPanelHost() : document.createElement("div"), $buttonsTarget = $host.querySelector(".panel-body") ?? $host;
+      this.$controls = this._createControls(), $buttonsTarget.append(this.$controls), this.$anchor.after($host), this.withToggler && this._renderToggler();
+    }
+    _createPanelHost() {
+      let $row = document.createElement("div");
+      return $row.className = "row", $row.style.cssText = "margin-left: 0px; margin-right: 0px;", $row.innerHTML = panelHtml, $row;
+    }
+    _createControls() {
+      let $container = document.createElement("div");
+      return $container.className = "listings-control", this.buttons.forEach((filter) => {
+        let button = new ToggleControlButton({
+          label: filter.label,
+          colors: filter.colors,
+          active: this.getState(filter),
+          count: this.getCount(filter),
+          onClick: () => this.onToggle(filter)
+        });
+        this.toggleButtons.set(filter.key, button), $container.append(button.$e);
+      }), $container;
+    }
+    /**
+     * External settings change: the BPC+ modal updates the same filter.
+     */
+    setState(filterKey, active, count) {
+      this.toggleButtons.get(filterKey)?.setState(active, count);
+    }
+    /**
+     * Small button on the far side of the heading row (stats page):
+     * hides the buttons, so the listings are seen at once, and brings them back.
+     */
+    _renderToggler() {
+      this.$anchor.classList.add("listings-control-heading"), this.$toggle = document.createElement("button"), this.$toggle.type = "button", this.$toggle.className = "listings-control-toggle", this.$toggle.dataset.tip = "top", this.$toggleIcon = document.createElement("i"), this.$toggle.append(this.$toggleIcon), this.$toggle.addEventListener("click", (event) => {
+        event.preventDefault(), event.stopPropagation(), this._setCollapsed(this.onToggleCollapsed());
+      }), this.$anchor.append(this.$toggle), this._setCollapsed(this.getCollapsed());
+    }
+    _setCollapsed(collapsed) {
+      this.$controls.classList.toggle("hidden", collapsed), this.$toggleIcon.className = collapsed ? "fa fa-fw fa-eye" : "fa fa-fw fa-eye-slash", this.$toggle.title = collapsed ? "Show listings control" : "Hide listings control", this.$toggle.setAttribute("aria-expanded", String(!collapsed));
+    }
+  };
+
+  // src/features/ListingsControl/index.js
+  var ListingsControl = class {
+    constructor({
+      listings = [],
+      onAutoscroll = () => {
+      },
+      filters = listingFilters,
+      ui = {}
+    } = {}) {
+      this.listings = listings, this.onAutoscroll = onAutoscroll, this.filters = filters, this.ui = new ListingsControlUI({
+        buttons: this.filters,
+        getState: (filter) => this.isEnabled(filter),
+        getCount: (filter) => this.countHiddenListings(filter),
+        onToggle: (filter) => this.toggle(filter),
+        getCollapsed: () => this.isCollapsed(),
+        onToggleCollapsed: () => this.toggleCollapsed(),
+        ...ui
+      }), this._applyState(), this._listenForSettings(), this._listenForKeybindings();
+    }
+    /**
+     * The BPC+ settings modal writes the same storage keys; apply them live
+     * and keep the panel button in sync.
+     */
+    _listenForSettings() {
+      window.addEventListener(settingsChangedEvent, (event) => {
+        let { key, value } = event.detail ?? {}, filter = this.filters.find((entry) => entry.key === key);
+        if (!filter) return;
+        let enabled = !!value;
+        this._apply(filter, enabled), this.ui.setState(
+          filter.key,
+          enabled,
+          this.countHiddenListings(filter)
+        );
+      });
+    }
+    /**
+     * Configurable shortcuts for the listing toggles of this page.
+     */
+    _listenForKeybindings() {
+      window.addEventListener("keydown", (event) => {
+        if (event.repeat || isEditableTarget(event.target)) return;
+        let bindings = getKeybindings(), action = listingKeybindingActions.find(
+          ({ id, filterKey }) => matchesBinding(event, bindings[id]) && this.filters.some((filter2) => filter2.key === filterKey)
+        );
+        if (!action) return;
+        let filter = this.filters.find(
+          (entry) => entry.key === action.filterKey
+        );
+        filter && (event.preventDefault(), this.toggle(filter));
+      });
+    }
+    /**
+     * How many listings of the page a toggle hides (0 for toggles that hide nothing).
+     */
+    countHiddenListings(filter) {
+      return filter.appliesTo ? this._getTargets(filter).length : 0;
+    }
+    isEnabled(filter) {
+      return !!gmStorage_default.get(filter.key, filter.defaultValue ?? !1);
+    }
+    toggle(filter) {
+      let enabled = gmStorage_default.toggle(filter.key, filter.defaultValue ?? !1);
+      return this._apply(filter, enabled), this.ui.setState(
+        filter.key,
+        enabled,
+        this.countHiddenListings(filter)
+      ), enabled;
+    }
+    /**
+     * Whether the buttons are folded away (stats page only: the toggler
+     * on the classifieds heading switches it, the classifieds panel is always open).
+     */
+    isCollapsed() {
+      return !!gmStorage_default.get(collapsedKey, !1);
+    }
+    toggleCollapsed() {
+      return gmStorage_default.toggle(collapsedKey, !1);
+    }
+    _applyState() {
+      this.filters.forEach((filter) => {
+        if (this.isEnabled(filter)) {
+          if (filter.isGlobal) {
+            whenPageReady(() => this._apply(filter, !0));
+            return;
+          }
+          this._apply(filter, !0);
+        }
+      });
+    }
+    _apply(filter, enabled) {
+      if (filter.isGlobal) {
+        enabled && this.onAutoscroll();
+        return;
+      }
+      this._getTargets(filter).forEach(
+        (listing) => filter.apply(listing, enabled)
+      );
+    }
+    _getTargets(filter) {
+      return filter.appliesTo ? this.listings.filter(filter.appliesTo) : this.listings;
+    }
+  };
+
+  // src/entities/listing/defineType.js
+  function defineListingType(listingData = {}) {
+    if (listingData.listing_price === "") return ListingType.MARKETPLACE;
+    let isBuyOrder = listingData.listing_intent === "buy";
+    return isBuyOrder && listingData.spell_1 ? ListingType.SPELL : isBuyOrder && (listingData.quality_elevated || listingData.effect_id && listingData.quality === "11") ? ListingType.STRANGE : ListingType.DEFAULT;
+  }
+
+  // src/entities/listing/defineAgeGroup.js
+  var dayInMs = 1440 * 60 * 1e3;
+  function defineAgeGroup(listedAt, now = Date.now()) {
+    let listedTimestamp = new Date(listedAt).getTime();
+    if (Number.isNaN(listedTimestamp)) return null;
+    if (now - listedTimestamp <= freshListingMaxAgeInDays * dayInMs)
+      return ListingAgeGroup.FRESH;
+    let staleThreshold = new Date(now);
+    return staleThreshold.setMonth(staleThreshold.getMonth() - staleListingMinAgeInMonths), listedTimestamp > staleThreshold.getTime() ? ListingAgeGroup.AGING : ListingAgeGroup.OLD;
+  }
+
+  // src/features/BlockedUsers/const.js
+  var blockedUsersStorageKey = "blockedUsers";
+
+  // src/features/BlockedUsers/index.js
+  var BlockedUsers = class _BlockedUsers {
+    static getAll() {
+      return gmStorage_default.get(blockedUsersStorageKey, []);
+    }
+    static isBlocked(userId) {
+      return _BlockedUsers.getAll().some((user) => user.id === userId);
+    }
+    static block(userName, userId) {
+      let blockedUsers = _BlockedUsers.getAll();
+      if (_BlockedUsers.isBlocked(userId)) return blockedUsers;
+      let nextBlockedUsers = [...blockedUsers, { userName, id: userId }];
+      return gmStorage_default.set(blockedUsersStorageKey, nextBlockedUsers);
+    }
+    static unblock(userId) {
+      let nextBlockedUsers = _BlockedUsers.getAll().filter(
+        (user) => user.id !== userId
+      );
+      return gmStorage_default.set(blockedUsersStorageKey, nextBlockedUsers);
+    }
+    static toggle(userName, userId) {
+      return _BlockedUsers.isBlocked(userId) ? _BlockedUsers.unblock(userId) : _BlockedUsers.block(userName, userId);
+    }
+  };
+
+  // src/global/index.js
+  var GlobalUserData = class _GlobalUserData {
+    static get pageWindow() {
+      return typeof unsafeWindow < "u" ? unsafeWindow : window;
+    }
+    static get session() {
+      return _GlobalUserData.pageWindow?.Session ?? null;
+    }
+    static get steamID64() {
+      let sessionId = _GlobalUserData.session?.steamid;
+      return sessionId ? String(sessionId) : document.querySelector(".username a")?.href.split("/").at(-1) ?? null;
+    }
+    static get appId() {
+      let appId = _GlobalUserData.session?.appid;
+      return appId != null ? String(appId) : null;
+    }
+    static get csrfToken() {
+      return _GlobalUserData.session?.csrf ?? null;
+    }
+    static get listingToken() {
+      let match = document.querySelector('a[href^="/logout"]')?.getAttribute("href")?.match(/[?&]user-id=([^&]+)/);
+      return match ? decodeURIComponent(match[1]) : _GlobalUserData.csrfToken;
+    }
+  };
+
+  // src/utils/listingPrice.js
+  var parseAmount = (value) => {
+    let normalized = `${value ?? ""}`.trim().replace(",", ".");
+    if (!normalized) return 0;
+    let amount = Number(normalized);
+    return Number.isFinite(amount) ? amount : Number.NaN;
+  }, parseListingPrice = (value = "") => {
+    let match = `${value}`.match(
+      /(\d+)\s*keys?(?:\s*[,-]?\s*(\d+(?:\.\d+)?)\s*ref)?|(\d+(?:\.\d+)?)\s*ref/i
+    );
+    return {
+      keys: match?.[1] ?? "",
+      metal: match?.[2] ?? match?.[3] ?? ""
+    };
+  }, formatListingPrice = (keys, metal) => [
+    keys > 0 ? `${keys} ${keys === 1 ? "key" : "keys"}` : "",
+    metal > 0 ? `${metal} ref` : ""
+  ].filter(Boolean).join(", ");
+
+  // src/features/ListingQuickEdit/index.js
+  var listingEndpoint = "/classifieds/listing", amountPattern = "[0-9]*[.,]?[0-9]*", detailsMaxLength = 200, quickEditButtonClass = "bcp-quick-edit-button", quickEditFormClass = "bcp-quick-edit-form", createElement2 = (tag, className = "", text = "") => {
+    let $element = document.createElement(tag);
+    return className && ($element.className = className), text && ($element.textContent = text), $element;
+  }, appendFormValue = (params, key, value) => {
+    if (value == null) {
+      params.append(key, "");
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach(
+        (entry, index) => appendFormValue(params, `${key}[${index}]`, entry)
+      );
+      return;
+    }
+    if (typeof value == "object") {
+      Object.entries(value).forEach(
+        ([childKey, childValue]) => appendFormValue(params, `${key}[${childKey}]`, childValue)
+      );
+      return;
+    }
+    params.append(key, String(value));
+  }, ListingQuickEdit = class _ListingQuickEdit {
+    /**
+     * Sell listings post an item id, buy orders post the item document.
+     */
+    static canEdit(listing) {
+      let steamId = GlobalUserData.steamID64;
+      if (!steamId || !listing || listing.$e.querySelector(
+        ".user-handle .user-link"
+      )?.dataset.id !== steamId) return !1;
+      let intent = listing.data.listing_intent;
+      return intent === "sell" ? !!listing.data.id : intent === "buy" && !!_ListingQuickEdit._relistPath(listing);
+    }
+    /**
+     * `<li id="listing-440_123">` -> `440_123`, the path of the site's edit form.
+     */
+    static _relistPath(listing) {
+      let id = listing.$e.id ?? "";
+      return id.startsWith("listing-") ? id.slice(8) : "";
+    }
+    constructor(listing, { onSaved = () => {
+    } } = {}) {
+      this.listing = listing, this.onSaved = onSaved, this.$form = null, this.buyState = null, this._renderButton();
+    }
+    _renderButton() {
+      let $buttons = this.listing.$e.querySelector(".listing-buttons");
+      $buttons && (this.$button = createElement2(
+        "button",
+        `btn btn-xs btn-bottom btn-default ${quickEditButtonClass}`
+      ), this.$button.type = "button", this.$button.title = "Quick edit price and description", this.$button.setAttribute(
+        "aria-label",
+        "Quick edit price and description"
+      ), this.$button.setAttribute("aria-expanded", "false"), this.$button.append(createElement2("i", "fa fa-pencil")), this.$button.addEventListener("click", () => this._toggle()), $buttons.append(this.$button));
+    }
+    async _toggle() {
+      if (this.$form) {
+        this._close();
+        return;
+      }
+      await this._open();
+    }
+    async _open() {
+      if (this.listing.data.listing_intent === "buy" && !this.buyState) {
+        this._setButtonBusy(!0);
+        try {
+          this.buyState = await this._loadBuyState();
+        } catch (error) {
+          console.error("Could not load the buy order form:", error), this.$button.title = `Could not open the editor: ${error.message}`;
+          return;
+        } finally {
+          this._setButtonBusy(!1);
+        }
+      }
+      let $body = this.listing.$e.querySelector(".listing-body");
+      $body && (this.$form = this._createForm(), this.$form.hidden = !1, $body.append(this.$form), this.$button.title = "Quick edit price and description", this.$button.classList.add("active"), this.$button.setAttribute("aria-expanded", "true"), this.$keys.focus(), this.$keys.select());
+    }
+    /**
+     * The buy order edit form carries the item document, so it is read from the
+     * site's relist page instead of duplicating the item attributes by hand.
+     */
+    async _loadBuyState() {
+      let path = _ListingQuickEdit._relistPath(this.listing), response = await fetch(
+        new URL(
+          `/classifieds/relist/${encodeURIComponent(path)}`,
+          window.location.origin
+        ),
+        { credentials: "same-origin" }
+      );
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      let doc = new DOMParser().parseFromString(
+        await response.text(),
+        "text/html"
+      ), match = [...doc.scripts].map(($script) => $script.textContent).find((text) => text.includes("initialItemDocument"))?.match(
+        /initialItemDocument\s*=\s*(\{[\s\S]*?\});\s*app\.createListingFormView/
+      );
+      if (!match) throw new Error("Could not read the item data.");
+      return {
+        item: JSON.parse(match[1]),
+        details: doc.querySelector("#listing-comments")?.value ?? "",
+        buyout: !!doc.querySelector("#prefer-buyout")?.checked,
+        offers: !!doc.querySelector("#prefer-trade-offers")?.checked
+      };
+    }
+    _close() {
+      this.$form?.remove(), this.$form = null, this.$button.classList.remove("active"), this.$button.setAttribute("aria-expanded", "false"), this._setStatus("");
+    }
+    _createForm() {
+      let { keys, metal } = parseListingPrice(
+        this.buyState?.price ?? this.listing.data.listing_price
+      ), $form = createElement2("form", quickEditFormClass);
+      $form.setAttribute("aria-label", "Quick edit listing");
+      let $fields = createElement2("div", "bcp-quick-edit-fields");
+      this.$keys = this._createCurrencyField("keys", "Keys", keys), this.$metal = this._createCurrencyField("metal", "Ref", metal), $fields.append(this.$keys.group, this.$metal.group);
+      let $details = createElement2("textarea", "form-control");
+      $details.name = "details", $details.maxLength = detailsMaxLength, $details.rows = 2, $details.placeholder = "Listing description", $details.value = this.buyState?.details ?? this.listing.data.listing_comment ?? "", $details.setAttribute("aria-label", "Listing description");
+      let $actions = createElement2("div", "bcp-quick-edit-actions"), $save = createElement2(
+        "button",
+        "btn btn-primary btn-xs",
+        "Save"
+      );
+      $save.type = "submit";
+      let $cancel = createElement2(
+        "button",
+        "btn btn-default btn-xs",
+        "Cancel"
+      );
+      $cancel.type = "button", $cancel.addEventListener("click", () => this._close());
+      let $status = createElement2("span", "bcp-quick-edit-status");
+      $status.setAttribute("role", "status"), $status.setAttribute("aria-live", "polite"), $actions.append($save, $cancel, $status), $form.append($fields, $details, $actions), this.$status = $status;
+      let clearValidity = () => {
+        this.$keys.input.setCustomValidity(""), this.$metal.input.setCustomValidity(""), $status.textContent = "", $status.classList.remove("text-danger");
+      };
+      return this.$keys.input.addEventListener("input", clearValidity), this.$metal.input.addEventListener("input", clearValidity), $form.addEventListener("keydown", (event) => {
+        event.key === "Escape" && this._close();
+      }), $form.addEventListener(
+        "submit",
+        (event) => this._save(event, $details, $save)
+      ), $form;
+    }
+    _createCurrencyField(name, addonText, value) {
+      let $group = createElement2(
+        "div",
+        "input-group bcp-quick-edit-currency"
+      ), $addon = createElement2("span", "input-group-addon", addonText), $input = createElement2("input", "form-control");
+      return $input.name = name, $input.type = "text", $input.inputMode = "decimal", $input.setAttribute("inputmode", "decimal"), $input.pattern = amountPattern, $input.autocomplete = "off", $input.spellcheck = !1, $input.placeholder = "0", $input.maxLength = 12, $input.value = value === "" ? "" : value, $input.setAttribute("aria-label", addonText), $group.append($addon, $input), { group: $group, input: $input };
+    }
+    async _save(event, $details, $save) {
+      event.preventDefault();
+      let keys = parseAmount(this.$keys.input.value), metal = parseAmount(this.$metal.input.value);
+      if (!Number.isInteger(keys) || keys < 0) {
+        this._fail(this.$keys.input, "Enter a whole number of keys.");
+        return;
+      }
+      if (!Number.isFinite(metal) || metal < 0) {
+        this._fail(this.$metal.input, "Enter a valid refined amount.");
+        return;
+      }
+      if (keys <= 0 && metal <= 0) {
+        this._fail(
+          this.$keys.input,
+          "Enter keys, refined metal, or both."
+        );
+        return;
+      }
+      let token = GlobalUserData.listingToken;
+      if (!token) {
+        this._setStatus("Could not read the listing token.", !0);
+        return;
+      }
+      let details = $details.value.trim(), priceText = formatListingPrice(keys, metal), intent = this.listing.data.listing_intent, offers = this._getOffers(), params = new URLSearchParams({
+        intent,
+        "currencies[metal]": String(metal || 0),
+        "currencies[keys]": String(keys || 0),
+        promoted: this.listing.$e.classList.contains("listing-promoted") ? "1" : "0",
+        buyout: offers ? "0" : "1",
+        offers: offers ? "1" : "0",
+        details,
+        "user-id": token
+      });
+      intent === "buy" ? appendFormValue(params, "item", this.buyState.item) : params.append("id", this.listing.data.id), this._setBusy($save, !0), this._setStatus("Saving\u2026");
+      try {
+        let response = await fetch(
+          new URL(listingEndpoint, window.location.origin),
+          {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded"
+            },
+            body: params
+          }
+        );
+        if (!response.ok) {
+          let message = `HTTP ${response.status}`;
+          try {
+            message = (await response.json())?.message ?? message;
+          } catch {
+          }
+          throw new Error(message);
+        }
+        this.listing.data.listing_price = priceText, this.listing.data.listing_comment = details, this.listing.$e.querySelector(".quote-box p")?.replaceChildren(
+          document.createTextNode(details)
+        ), this.onSaved(), this._close(), this._flashSaved();
+      } catch (error) {
+        console.error("Quick edit failed:", error), this._setStatus(`Could not save: ${error.message}`, !0), this._setBusy($save, !1);
+      }
+    }
+    /**
+     * A listing offers negotiation unless its trade button is marked as buyout-only.
+     */
+    _getOffers() {
+      if (this.buyState) return this.buyState.offers;
+      let $trade = this.listing.$e.querySelector(
+        '.listing-buttons a[href*="tradeoffer"]'
+      );
+      return $trade ? $trade.title.includes("Negotiation is allowed") : !0;
+    }
+    _flashSaved() {
+      let $saved = createElement2(
+        "span",
+        "bcp-quick-edit-saved",
+        "Saved"
+      );
+      this.$button.after($saved), setTimeout(() => $saved.remove(), 2500);
+    }
+    _setButtonBusy(busy) {
+      this.$button && (this.$button.disabled = busy, this.$button.replaceChildren(
+        createElement2("i", busy ? "fa fa-spinner fa-spin" : "fa fa-pencil")
+      ));
+    }
+    _fail($input, message) {
+      $input.setCustomValidity(message), $input.setAttribute("aria-invalid", "true"), this._setStatus(message, !0), $input.reportValidity(), $input.focus();
+    }
+    _setBusy($button, busy) {
+      this.$form?.setAttribute("aria-busy", String(busy)), this.$form?.querySelectorAll("input, textarea, button").forEach(($control) => {
+        $control.disabled = busy;
+      }), $button.textContent = busy ? "Saving\u2026" : "Save";
+    }
+    _setStatus(message, isError = !1) {
+      this.$status && (this.$status.textContent = message, this.$status.classList.toggle("text-danger", isError));
+    }
+  };
+
+  // src/features/UI/components/Button/index.js
+  function Button() {
+    let $b = document.createElement("button");
+    return $b.className = "btn btn-xs btn-secondary", $b;
+  }
+
+  // src/features/UI/components/BlockButton/BlockButton.js
+  function BlockButton({ blocked = !1, userName = "" } = {}) {
+    let $b = Button();
+    $b.classList.add("bcp-block-button");
+    let $icon = document.createElement("i");
+    return $icon.className = "fa fa-ban", $b.append($icon), $b.title = `${blocked ? "Unblock" : "Block"} ${userName}?`, $b;
+  }
+
+  // src/features/UI/listing/index.js
+  var sellerNameStylePattern = /^(?:awesome\d+|xmas|premium)$/, intentIconReplacements = {
+    "fa-arrow-left": "fa-angle-left",
+    "fa-arrow-right": "fa-angle-right"
+  };
+  function getCurrencyRank(pricePart) {
+    return /keys?/i.test(pricePart) ? 0 : /ref/i.test(pricePart) ? 1 : 2;
+  }
+  var ListingUI = class {
+    constructor(listing) {
+      this.listing = listing, this.type = defineListingType(listing.data), this.blocked = BlockedUsers.isBlocked(this.userId), this.isDeviantItem = !1, this.sellerNameStyleClass = this._findSellerNameStyleClass(), this._render();
+    }
+    get $e() {
+      return this.listing.$e;
+    }
+    get userId() {
+      return this.listing.data.listing_account_id;
+    }
+    get userName() {
+      return this.listing.data.listing_name;
+    }
+    get meta() {
+      return listingTypeMeta[this.type] ?? listingTypeMeta[ListingType.DEFAULT];
+    }
+    /**
+     * Listings of the same item share its definition, quality and effect.
+     * Page specific bits (offers url, promotion, ...) must not split the group.
+     */
+    get groupKey() {
+      let {
+        app = "",
+        defindex = "",
+        quality = "",
+        effect_id = ""
+      } = this.listing.data;
+      return [app, defindex, quality, effect_id].join("|");
+    }
+    /**
+     * The whole price split by currency: `["20 keys", "30 ref"]`.
+     * The site's tag shows a converted number instead of the real listing price.
+     */
+    get priceParts() {
+      let {
+        listing_price: listingPrice = "",
+        p_bptf: marketPrice = ""
+      } = this.listing.data;
+      return (listingPrice || marketPrice).split(/,\s+/).map((pricePart) => pricePart.trim()).filter(Boolean).sort((a, b) => getCurrencyRank(a) - getCurrencyRank(b));
+    }
+    truncateTheListing(enabled) {
+      let $message = this.$e.querySelector("p");
+      $message && (enabled === void 0 ? $message.classList.toggle("truncated") : $message.classList.toggle("truncated", enabled));
+    }
+    /**
+     * Swaps the "bumped at" date for the "listed at" one (and back).
+     */
+    toggleListedTime(enabled) {
+      this.$e.classList.toggle("listed-time", enabled);
+    }
+    toggleVisibility(enabled) {
+      this.meta.hiddenClass && this.$e.classList.toggle(this.meta.hiddenClass, enabled);
+    }
+    toggleBlockedVisibility(enabled) {
+      this.$e.classList.toggle(blockedListingHiddenClass, enabled);
+    }
+    /**
+     * Compact view: icon, price, name, trade offer, date and seller.
+     * A deviant item keeps the accent, so the main listings stay quiet.
+     */
+    setCompactMode(enabled) {
+      this.$e.classList.toggle(compactListingClass, enabled), this.$e.classList.toggle(
+        compactListingDeviantClass,
+        enabled && this.isDeviantItem
+      );
+    }
+    /**
+     * Swaps the rounded site price ("20.46 keys") for the whole currency
+     * ("20 keys" over "30 ref") on the compact rows.
+     */
+    setFullCurrency(enabled) {
+      this.$e.classList.toggle(fullCurrencyListingClass, enabled);
+    }
+    /**
+     * Removes/restores the `awesomeN` class that gives the seller nickname its custom look.
+     */
+    toggleSellerNameStyle(enabled) {
+      let $userLink = this.$e.querySelector(".user-handle .user-link");
+      $userLink && (this.sellerNameStyleClass ??= this._findSellerNameStyleClass(), this.sellerNameStyleClass && $userLink.classList.toggle(this.sellerNameStyleClass, enabled));
+    }
+    /**
+     * Re-reads the listing price after a quick edit and rebuilds the compact chip.
+     */
+    refreshPrice() {
+      this.$e.querySelector(`.${compactPriceClass}`)?.remove(), this.$e.classList.remove(compactPriceListingClass), this._renderCompactPrice();
+      let $tagValue = this.$e.querySelector(".tag.bottom-right span");
+      $tagValue && ($tagValue.textContent = this.priceParts.join(", "));
+    }
+    /**
+     * Enables/disables the age coloring of both listing dates.
+     */
+    setAgeHighlight(enabled) {
+      this.ageHighlightClass ??= this._findAgeHighlightClass(), this.ageHighlightClass && this._getDateTimes().forEach(
+        ($time) => $time.classList.toggle(this.ageHighlightClass, enabled)
+      );
+    }
+    _render() {
+      this._rewriteDateCaptions(), this._removeOnlineIndicator(), this._replaceIntentIcons(), this.ageHighlightClass = this._findAgeHighlightClass(), this._makeStrangeNameClickable(), this._highlight(), this._renderTypeBadge(), this._renderBlockButton(), this._renderQuickEdit(), this._renderCompactPrice(), this._bindTruncation();
+    }
+    /**
+     * The listing type is marked by a small icon next to the item name,
+     * the same way the STN.tf source icon is shown - no full-row tint.
+     */
+    _renderTypeBadge() {
+      let badge = this.meta.badge;
+      if (!badge) return;
+      let $name = this.$e.querySelector(".listing-title h5");
+      if (!$name) return;
+      let $icon = document.createElement("i");
+      $icon.className = `${badge.iconClass} bcp-listing-type-icon`, $icon.title = `${badge.label} listing`, $name.append(" ", $icon);
+    }
+    _renderQuickEdit() {
+      ListingQuickEdit.canEdit(this.listing) && (this.quickEdit = new ListingQuickEdit(this.listing, {
+        onSaved: () => this.refreshPrice()
+      }));
+    }
+    /**
+     * A compact row shows the price currency by currency, so keys and refined
+     * keep their own line and the numbers stay aligned.
+     */
+    _renderCompactPrice() {
+      if (this.$e.classList.contains(keysOnlyPriceListingClass)) return;
+      let priceParts = this.priceParts, $listingItem = this.$e.querySelector(".listing-item");
+      if (!priceParts.length || !$listingItem) return;
+      let $price = document.createElement("span");
+      $price.className = compactPriceClass, priceParts.forEach((pricePart) => {
+        let $row = document.createElement("span");
+        $row.className = `${compactPriceClass}-row`, $row.textContent = pricePart, $price.append($row);
+      }), this.$e.classList.add(compactPriceListingClass), $listingItem.append($price);
+    }
+    /**
+     * Both dates of the listing ("Bumped" and "Listed").
+     * A listing that was never bumped has a single date.
+     */
+    _getDateTimes() {
+      let $dateContainer = this.$e.querySelector(".click-data-toggle");
+      return $dateContainer ? [...$dateContainer.querySelectorAll("time[datetime]")] : [];
+    }
+    /**
+     * Both dates are colored by the age of the listing, so a recently bumped
+     * but old listing is still reported as an old one:
+     * 3 weeks or less - green, less than 2 months - yellow, older - dark red.
+     */
+    _findAgeHighlightClass() {
+      let $dateContainer = this.$e.querySelector(".click-data-toggle"), $listedTime = $dateContainer?.querySelector(".data2 time[datetime]") ?? $dateContainer?.querySelector("time[datetime]");
+      if (!$listedTime) return null;
+      let ageGroup = defineAgeGroup($listedTime.getAttribute("datetime"));
+      return ageGroup ? listingAgeClasses[ageGroup] : null;
+    }
+    /**
+     * Moves "Bumped"/"Listed" into the date titles and replaces them with icons,
+     * so the date itself gets the space of the label. The "by" separator goes away
+     * too - the dates and the nickname are placed on the opposite sides of the row.
+     */
+    _rewriteDateCaptions() {
+      let $dateContainer = this.$e.querySelector(".click-data-toggle");
+      $dateContainer && (Object.entries(listingDateMeta).forEach(([className, meta]) => {
+        this._rewriteDateCaption(
+          $dateContainer.querySelector(`.${className}`),
+          meta
+        );
+      }), this._removeCaptionText($dateContainer, "by"));
+    }
+    _rewriteDateCaption($container, { label, icon }) {
+      let $time = $container?.querySelector("time[datetime]");
+      if (!$time) return;
+      let $icon = document.createElement("i");
+      $icon.className = icon, $time.before($icon), $time.title = $time.title ? `${label}: ${$time.title}` : label, this._removeCaptionText($container, label);
+    }
+    /**
+     * Captions are plain text nodes next to the dates ("Bumped ", "Listed ", " by ").
+     */
+    _removeCaptionText($container, caption) {
+      [...$container.childNodes].filter(
+        ($node) => $node.nodeType === Node.TEXT_NODE && $node.textContent.includes(caption)
+      ).forEach(($node) => $node.remove());
+    }
+    /**
+     * The online/offline dot next to the seller nickname says nothing on a listing - it goes away.
+     */
+    _removeOnlineIndicator() {
+      this.$e.querySelectorAll(".user-handle .user-link .fa-circle, .user-handle .user-link .fa-circle-o").forEach(
+        ($dot) => $dot.remove()
+      );
+    }
+    /**
+     * Both intent variants (buying and selling) get the same angle arrow.
+     */
+    _replaceIntentIcons() {
+      this.$e.querySelectorAll(
+        ".listing-title i, .listing-intent-buy, .listing-intent-sell"
+      ).forEach(
+        ($icon) => Object.entries(intentIconReplacements).forEach(([from, to]) => {
+          $icon.classList.contains(from) && ($icon.classList.remove(from), $icon.classList.add(to));
+        })
+      );
+    }
+    _findSellerNameStyleClass() {
+      return (this.$e.querySelector(".user-handle .user-link")?.className ?? "").split(/\s+/).find((token) => sellerNameStylePattern.test(token)) ?? null;
+    }
+    _highlight() {
+      this.blocked && (this.$e.style.backgroundColor = blockedListingHighlight);
+    }
+    _bindTruncation() {
+      this.$e.addEventListener("dblclick", () => this.truncateTheListing());
+    }
+    _renderBlockButton() {
+      let $container = this.$e.querySelector(".user-handle");
+      $container && (this.$blockButton = BlockButton({
+        blocked: this.blocked,
+        userName: this.userName
+      }), this.$blockButton.addEventListener(
+        "click",
+        () => this._toggleBlockState()
+      ), $container.append(this.$blockButton));
+    }
+    /**
+     * The native confirm is enough here - the old in-listing popup was one more
+     * absolutely positioned element that had to fight with the site layout.
+     */
+    _toggleBlockState() {
+      let action = this.blocked ? "Unblock" : "Block";
+      window.confirm(`${action} ${this.userName}?`) && (BlockedUsers.toggle(this.userName, this.userId), window.location.reload());
+    }
+    _makeStrangeNameClickable() {
+      if (this.type !== ListingType.STRANGE || this.listing.data.quality !== "5") return;
+      let $title = this.$e.querySelector(".listing-title");
+      if (!$title) return;
+      let { name = "", effect_id = "" } = this.listing.data;
+      $title.classList.add("clickable-name"), $title.title = "Redirect to Non-Strange unusual", $title.addEventListener("click", () => {
+        window.open(
+          `https://backpack.tf/stats/Unusual/${encodeURIComponent(name)}/Tradable/Craftable/${encodeURIComponent(effect_id)}`
+        );
+      });
+    }
+  };
+
+  // src/features/ListingsController/index.js
+  var ListingsController = class {
+    constructor(listings = Store.listings) {
+      this.listings = listings.map((listing) => new ListingUI(listing)), this._markDeviantItems();
+    }
+    /**
+     * The item of the first listing is the main one of the page, so listings of
+     * the same item stay quiet and the deviant ones are highlighted.
+     */
+    _markDeviantItems() {
+      let mainGroupKey = this.listings[0]?.groupKey;
+      this.listings.forEach((listing) => {
+        listing.isDeviantItem = listing.groupKey !== mainGroupKey;
+      });
+    }
+  };
+
+  // src/features/PageControl/index.js
+  var listingsScrollOffset = 40, PageControl = class _PageControl {
+    constructor() {
+      [this.lastPage, this.currentPage] = _PageControl._getPaginationData(), this._setupKeyboardNavigation(), this._addSidebars(), this._listenForSettings();
+    }
+    static _getPaginationData() {
+      let $lastPageLink = document.querySelector(".pagination")?.lastElementChild?.querySelector("a"), url = new URL(window.location.href), currentPage = Number(url.searchParams.get("page")) || 1;
+      return [$lastPageLink && Number(
+        new URL($lastPageLink.href, window.location.origin).searchParams.get(
+          "page"
+        )
+      ) || currentPage, currentPage];
+    }
+    gotoPage(page) {
+      let url = new URL(window.location.href);
+      url.searchParams.set("page", page), window.location.href = url.toString();
+    }
+    goToNextPage() {
+      this.currentPage < this.lastPage && this.gotoPage(this.currentPage + 1);
+    }
+    goToPreviousPage() {
+      this.currentPage > 1 && this.gotoPage(this.currentPage - 1);
+    }
+    scrollToListings() {
+      let $firstListing = document.querySelector(".listing"), $listingsContainer = $firstListing?.closest(".row") ?? $firstListing?.parentElement;
+      if (!$listingsContainer) return;
+      let offset = $listingsContainer.getBoundingClientRect().top + window.pageYOffset - listingsScrollOffset;
+      window.scrollTo({ top: offset });
+    }
+    _setupKeyboardNavigation() {
+      window.addEventListener("keydown", (event) => {
+        if (event.repeat || isEditableTarget(event.target)) return;
+        let bindings = getKeybindings(), action = navigationKeybindingActions.find(
+          ({ id }) => matchesBinding(event, bindings[id])
+        );
+        action && (event.preventDefault(), action.id === "next" && this.goToNextPage(), action.id === "previous" && this.goToPreviousPage());
+      });
+    }
+    _addSidebars() {
+      this.$pageContent = document.querySelector("#page-content"), this.$pageContent && (this.$sidebars = /* @__PURE__ */ new Map(), sidebarSettings.forEach(({ key, side }) => {
+        let $sidebar = this._createSidebar(
+          `${side}-sidebar`,
+          side,
+          side === "left" ? () => this.goToPreviousPage() : () => this.goToNextPage()
+        );
+        this.$sidebars.set(key, $sidebar), this.$pageContent.append($sidebar);
+      }), this._applySidebarSettings());
+    }
+    _listenForSettings() {
+      window.addEventListener(settingsChangedEvent, (event) => {
+        sidebarSettings.some(
+          (setting) => setting.key === event.detail?.key
+        ) && this._applySidebarSettings();
+      });
+    }
+    _applySidebarSettings() {
+      this.$sidebars && sidebarSettings.forEach(({ key }) => {
+        let $sidebar = this.$sidebars.get(key);
+        $sidebar && $sidebar.classList.toggle(
+          "hidden",
+          !gmStorage_default.get(key, !0)
+        );
+      });
+    }
+    _createSidebar(className, side, onClick) {
+      let $sidebar = document.createElement("div");
+      return $sidebar.classList.add("sidebar", className), $sidebar.style[side] = "0", $sidebar.addEventListener("click", onClick), $sidebar;
+    }
+  };
 
   // src/pages/classifiedsPage.js
   var classifiedsPage_default = {
@@ -2123,31 +3430,6 @@ body.bcp-hide-add-button .bcp-add-button {
   var historyPage_default = {
     init() {
       console.log("History page loaded");
-    }
-  };
-
-  // src/global/index.js
-  var GlobalUserData = class _GlobalUserData {
-    static get pageWindow() {
-      return typeof unsafeWindow < "u" ? unsafeWindow : window;
-    }
-    static get session() {
-      return _GlobalUserData.pageWindow?.Session ?? null;
-    }
-    static get steamID64() {
-      let sessionId = _GlobalUserData.session?.steamid;
-      return sessionId ? String(sessionId) : document.querySelector(".username a")?.href.split("/").at(-1) ?? null;
-    }
-    static get appId() {
-      let appId = _GlobalUserData.session?.appid;
-      return appId != null ? String(appId) : null;
-    }
-    static get csrfToken() {
-      return _GlobalUserData.session?.csrf ?? null;
-    }
-    static get listingToken() {
-      let match = document.querySelector('a[href^="/logout"]')?.getAttribute("href")?.match(/[?&]user-id=([^&]+)/);
-      return match ? decodeURIComponent(match[1]) : _GlobalUserData.csrfToken;
     }
   };
 
@@ -2432,12 +3714,12 @@ body.bcp-hide-add-button .bcp-add-button {
   };
 
   // src/features/InventoryCache/QuickList.js
-  var panelId = "bcp-quick-list", bodyId = "bcp-quick-list-body", titleId = "bcp-quick-list-title", hintId = "bcp-quick-list-hint", expandedStorageKey = "stats_quick_list_expanded", tradeLinkStorageKey = "tradelink", listingEndpoint = "/classifieds/listing", amountPattern = "[0-9]*[.,]?[0-9]*", parseAmount = (value) => {
+  var panelId = "bcp-quick-list", bodyId = "bcp-quick-list-body", titleId = "bcp-quick-list-title", hintId = "bcp-quick-list-hint", expandedStorageKey = "stats_quick_list_expanded", tradeLinkStorageKey = "tradelink", listingEndpoint2 = "/classifieds/listing", amountPattern2 = "[0-9]*[.,]?[0-9]*", parseAmount2 = (value) => {
     let normalized = `${value ?? ""}`.trim().replace(",", ".");
     if (!normalized) return 0;
     let amount = Number(normalized);
     return Number.isFinite(amount) ? amount : Number.NaN;
-  }, parseListingPrice = (value = "") => {
+  }, parseListingPrice2 = (value = "") => {
     let match = `${value}`.match(
       /(\d+)\s*keys?(?:\s*[,-]?\s*(\d+(?:\.\d+)?)\s*ref)?|(\d+(?:\.\d+)?)\s*ref/i
     );
@@ -2452,7 +3734,7 @@ body.bcp-hide-add-button .bcp-add-button {
     if (minutes < 60) return `${minutes}m ago`;
     let hours = Math.round(minutes / 60);
     return hours < 24 ? `${hours}h ago` : `${Math.round(hours / 24)}d ago`;
-  }, createElement = (tag, className = "", text = "") => {
+  }, createElement3 = (tag, className = "", text = "") => {
     let $element = document.createElement(tag);
     return className && ($element.className = className), text && ($element.textContent = text), $element;
   }, QuickList = class {
@@ -2464,21 +3746,21 @@ body.bcp-hide-add-button .bcp-add-button {
     }
     _render() {
       let $headerRow = document.querySelector(".stats-header-row");
-      $headerRow && (this.$panel?.remove(), this.$status = null, this.$panel = createElement("section", "bcp-quick-list"), this.$panel.id = panelId, this.$panel.setAttribute("aria-labelledby", titleId), this._renderSellPanel(), $headerRow.append(this.$panel));
+      $headerRow && (this.$panel?.remove(), this.$status = null, this.$panel = createElement3("section", "bcp-quick-list"), this.$panel.id = panelId, this.$panel.setAttribute("aria-labelledby", titleId), this._renderSellPanel(), $headerRow.append(this.$panel));
     }
     _renderSellPanel() {
-      this.$toggle = createElement(
+      this.$toggle = createElement3(
         "button",
         "bcp-quick-list-toggle"
       ), this.$toggle.type = "button", this.$toggle.id = titleId, this.$toggle.setAttribute("aria-expanded", "false"), this.$toggle.setAttribute("aria-controls", bodyId);
-      let $title = createElement("span", "bcp-quick-list-title");
+      let $title = createElement3("span", "bcp-quick-list-title");
       $title.append(
-        createElement("i", "fa fa-tag"),
+        createElement3("i", "fa fa-tag"),
         " Sell your item"
-      ), this.$headMeta = createElement("span", "bcp-quick-list-head-meta"), this.$caret = createElement(
+      ), this.$headMeta = createElement3("span", "bcp-quick-list-head-meta"), this.$caret = createElement3(
         "i",
         "fa fa-chevron-down bcp-quick-list-caret"
-      ), this.$caret.setAttribute("aria-hidden", "true"), this.$toggle.append($title, this.$headMeta, this.$caret), this.$toggle.addEventListener("click", () => this._toggle()), this.$body = createElement("div", "bcp-quick-list-body"), this.$body.id = bodyId, this.$body.hidden = !0, this.$panel.append(this.$toggle, this.$body), this._setExpanded(
+      ), this.$caret.setAttribute("aria-hidden", "true"), this.$toggle.append($title, this.$headMeta, this.$caret), this.$toggle.addEventListener("click", () => this._toggle()), this.$body = createElement3("div", "bcp-quick-list-body"), this.$body.id = bodyId, this.$body.hidden = !0, this.$panel.append(this.$toggle, this.$body), this._setExpanded(
         !!gmStorage_default.get(expandedStorageKey, !1),
         !1
       ), this._renderHeadMeta(), this._renderBody();
@@ -2495,21 +3777,21 @@ body.bcp-hide-add-button .bcp-add-button {
     }
     _renderBody() {
       this.$body.replaceChildren();
-      let $rows = createElement("div", "bcp-quick-list-rows");
+      let $rows = createElement3("div", "bcp-quick-list-rows");
       this.items.forEach((item) => $rows.append(this._createRow(item)));
-      let $hint = createElement(
+      let $hint = createElement3(
         "p",
         "help-block",
         "Enter keys, refined metal, or both. Each copy is published separately."
       );
-      $hint.id = hintId, this.$status = createElement("p", "bcp-quick-list-status"), this.$status.setAttribute("role", "status"), this.$status.setAttribute("aria-live", "polite"), this.$status.setAttribute("aria-atomic", "true"), this.$body.append($rows, $hint, this.$status);
+      $hint.id = hintId, this.$status = createElement3("p", "bcp-quick-list-status"), this.$status.setAttribute("role", "status"), this.$status.setAttribute("aria-live", "polite"), this.$status.setAttribute("aria-atomic", "true"), this.$body.append($rows, $hint, this.$status);
     }
     _createRow(item) {
-      let infoId = `${`bcp-quick-list-row-${item.id}`}-info`, $form = createElement("form", "bcp-quick-list-row");
+      let infoId = `${`bcp-quick-list-row-${item.id}`}-info`, $form = createElement3("form", "bcp-quick-list-row");
       $form.setAttribute("aria-labelledby", infoId);
-      let $info = createElement("div", "bcp-quick-list-row-info");
+      let $info = createElement3("div", "bcp-quick-list-row-info");
       $info.id = infoId;
-      let $idLink = createElement(
+      let $idLink = createElement3(
         "a",
         "bcp-quick-list-item-link",
         `#${item.id}`
@@ -2530,13 +3812,13 @@ body.bcp-hide-add-button .bcp-add-button {
         "metal",
         "Ref",
         "Refined Metal"
-      ), $publish = createElement(
+      ), $publish = createElement3(
         "button",
         "btn btn-primary bcp-quick-list-publish",
         "Publish"
       );
       if ($publish.type = "submit", $publish.title = `Publish listing for #${item.id}`, !!(item.listing_intent || item.listing_price)) {
-        let price = parseListingPrice(item.listing_price);
+        let price = parseListingPrice2(item.listing_price);
         price.keys && (keys.input.value = price.keys), price.metal && (metal.input.value = price.metal), $publish.textContent = "Relist", $publish.title = `Relist copy #${item.id}`, $form.classList.add("is-listed");
       }
       let clearValidity = () => {
@@ -2555,17 +3837,17 @@ body.bcp-hide-add-button .bcp-add-button {
       ), $form.append($info, keys.group, metal.group, $publish), $form;
     }
     _createCurrencyField(idBase, name, addonText, ariaLabel = addonText) {
-      let id = `bcp-quick-list-${idBase}`, $group = createElement(
+      let id = `bcp-quick-list-${idBase}`, $group = createElement3(
         "div",
         "input-group bcp-quick-list-currency"
-      ), $addon = createElement("span", "input-group-addon", addonText);
+      ), $addon = createElement3("span", "input-group-addon", addonText);
       $addon.title = ariaLabel;
-      let $input = createElement("input", "form-control");
-      return $input.id = id, $input.name = name, $input.type = "text", $input.inputMode = "decimal", $input.setAttribute("inputmode", "decimal"), $input.pattern = amountPattern, $input.autocomplete = "off", $input.spellcheck = !1, $input.placeholder = "0", $input.maxLength = 12, $input.setAttribute("aria-label", ariaLabel), $input.setAttribute("aria-describedby", hintId), $group.append($addon, $input), { group: $group, input: $input };
+      let $input = createElement3("input", "form-control");
+      return $input.id = id, $input.name = name, $input.type = "text", $input.inputMode = "decimal", $input.setAttribute("inputmode", "decimal"), $input.pattern = amountPattern2, $input.autocomplete = "off", $input.spellcheck = !1, $input.placeholder = "0", $input.maxLength = 12, $input.setAttribute("aria-label", ariaLabel), $input.setAttribute("aria-describedby", hintId), $group.append($addon, $input), { group: $group, input: $input };
     }
     async _handleRowSubmit(event, item, $keys, $metal, $form, $publish) {
       event.preventDefault();
-      let keys = parseAmount($keys.value), metal = parseAmount($metal.value);
+      let keys = parseAmount2($keys.value), metal = parseAmount2($metal.value);
       if (!Number.isFinite(keys) || keys < 0) {
         this._setCustomValidity(
           $keys,
@@ -2610,7 +3892,7 @@ body.bcp-hide-add-button .bcp-add-button {
       });
       this._setRowBusy($form, $publish, !0), this._setStatus(`Publishing #${item.id}\u2026`);
       try {
-        let response = await fetch(listingEndpoint, {
+        let response = await fetch(listingEndpoint2, {
           method: "POST",
           headers: {
             "Content-Type": "application/x-www-form-urlencoded"
@@ -3309,43 +4591,6 @@ body.bcp-hide-add-button .bcp-add-button {
     }
   };
 
-  // src/features/StatsLinks/const.js
-  var marketplaceSiteName = "Marketplace.tf", manncoSiteName = "Mannco.store", sites = [
-    {
-      baseLink: "https://marketplace.tf/items/tf2/",
-      siteName: marketplaceSiteName,
-      siteIcon: "/images/marketplace-medium.png?v=2"
-    },
-    {
-      baseLink: "https://mannco.store/item/440-",
-      siteName: manncoSiteName,
-      iconClass: "fa fa-money"
-    },
-    {
-      baseLink: "https://stntrading.eu/item/tf2/Unusual+",
-      siteName: "STN.tf",
-      siteIcon: "https://stntrading.eu/assets/img/logos/icon.svg"
-    },
-    {
-      baseLink: "https://gladiator.tf/sales?item=",
-      siteName: "Gladiator.tf",
-      inSideColumn: !0,
-      siteIcon: "data:image/png;base64,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"
-    },
-    {
-      baseLink: "https://next.backpack.tf/classifieds/snapshots/",
-      siteName: "Next snapshots",
-      iconClass: "fa fa-camera",
-      inSideColumn: !0
-    },
-    {
-      baseLink: "https://archivist.tf/history?item=",
-      siteName: "Archivist.tf",
-      iconClass: "fa fa-archive",
-      inSideColumn: !0
-    }
-  ], siteLinkHiddenKey = (siteName) => `hide_site_link_${siteName}`;
-
   // src/utils/convertCurrentDayToDateTail.js
   function convertCurrentDayToDateTail($timeColumn = null) {
     let rawDate = $timeColumn ? $timeColumn.innerText.trim() : Date.now();
@@ -3374,7 +4619,17 @@ body.bcp-hide-add-button .bcp-add-button {
     constructor() {
       importSharedButton(), this.itemData = document.querySelector(
         ".stats-header-item > .item"
-      )?.dataset, this.itemData && (this.$itemName = document.querySelector(".stats-header-title"), this._splitTitle(), this._makeStrangeNameClickable(), this._renderSiteLinks());
+      )?.dataset, this.itemData && (this.$itemName = document.querySelector(".stats-header-title"), this._splitTitle(), this._makeStrangeNameClickable(), this._renderSiteLinks(), this._listenForSettings());
+    }
+    /**
+     * Visibility of a site button is configured from the BPC+ settings modal.
+     */
+    _listenForSettings() {
+      window.addEventListener(settingsChangedEvent, (event) => {
+        String(event.detail?.key ?? "").startsWith(
+          "hide_site_link_"
+        ) && this.refreshSiteLinks();
+      });
     }
     /**
      * Effect goes above the item name: the full title is split into two blocks,
@@ -3619,71 +4874,28 @@ body.bcp-hide-add-button .bcp-add-button {
     }
   };
 
-  // src/features/StatsModulesController/const.js
-  var statModules = [
-    {
-      moduleName: "Item Instances Graph",
-      positionKey: "itemInstancesGraphPos",
-      defaultPosition: 0,
-      hideKey: "Item_Instances_Graph",
-      elements: ($statsBody) => [
-        $statsBody.querySelectorAll(".guttered")[0],
-        $statsBody.querySelector(".well")
-      ]
-    },
-    {
-      moduleName: "Paint Distribution",
-      positionKey: "paintDistributionGraphPos",
-      defaultPosition: 1,
-      hideKey: "Paint_Distribution"
-    },
-    {
-      moduleName: "Level Distribution",
-      positionKey: "levelDistributionGraphPos",
-      defaultPosition: 2,
-      hideKey: "Level_Distribution"
-    },
-    {
-      moduleName: "Strange Parts",
-      positionKey: "strangeDistributionGraphPos",
-      defaultPosition: 3,
-      hideKey: "Strange_Parts"
-    },
-    {
-      moduleName: "classifieds",
-      positionKey: "classifiedsPos",
-      defaultPosition: 4,
-      elements: ($statsBody) => {
-        let $header = $statsBody.querySelector("h2#classifieds");
-        return [$header, $header?.nextElementSibling];
-      }
-    },
-    {
-      moduleName: "Suggestions",
-      positionKey: "suggestionsPos",
-      defaultPosition: 5,
-      elements: ($statsBody) => {
-        let $headers = $statsBody.querySelectorAll("h2");
-        return [$headers[$headers.length - 1], $statsBody.querySelectorAll(".row")[1]];
-      }
-    }
-  ], amountHeaderIndex = 2, collapseModulesKey = "stats_modules_collapsed", statsFeatureToggles = [
-    {
-      label: "Sell your item",
-      key: "stats_quick_list_hidden",
-      className: "bcp-hide-quick-list"
-    },
-    {
-      label: "Add button",
-      key: "stats_add_button_hidden",
-      className: "bcp-hide-add-button"
-    }
-  ];
-
   // src/features/StatsModulesController/index.js
   var notHideableModules = ["classifieds", "Suggestions"], StatsModulesController = class {
     constructor({ statsLinks = null } = {}) {
-      this.$statsBody = document.querySelectorAll(".stats-body")[1], this.$statsBody && (this.statsLinks = statsLinks, this.modules = statModules.map((config) => this._resolveModule(config)), this._renderModuleContainers(), this._renderSettings(), this._applyDefaults(), this._applyFeatureToggles());
+      this.$statsBody = document.querySelectorAll(".stats-body")[1], this.$statsBody && (this.statsLinks = statsLinks, this.modules = statModules.map((config) => this._resolveModule(config)), this._renderModuleContainers(), this._renderSettings(), this._applyDefaults(), this._applyFeatureToggles(), this._listenForSettings());
+    }
+    /**
+     * The BPC+ settings modal writes the same storage keys; apply them live.
+     */
+    _listenForSettings() {
+      window.addEventListener(settingsChangedEvent, (event) => {
+        let { key, value } = event.detail ?? {}, module = this.modules.find((entry) => entry.hideKey === key);
+        if (module) return this._setModuleVisibility(module, !!value);
+        if (key === collapseModulesKey)
+          return this._applyCollapse(!!value);
+        let feature = statsFeatureToggles.find(
+          (entry) => entry.key === key
+        );
+        feature && document.body.classList.toggle(
+          feature.className,
+          !!value
+        );
+      });
     }
     _resolveModule(config) {
       let elements = (config.elements?.(this.$statsBody) ?? this._findModuleElements(config.moduleName)).filter(Boolean);
@@ -3722,10 +4934,23 @@ body.bcp-hide-add-button .bcp-add-button {
       return amount === 0 ? "Item may not exist" : amount === "only one" ? "Only one instance exists" : `${amount} instances exist`;
     }
     _toggleModule(module) {
-      if (!module?.exists || notHideableModules.includes(module.moduleName)) return;
-      (module.elements.length > amountHeaderIndex ? module.elements.slice(0, amountHeaderIndex) : [module.elements[1]]).filter(Boolean).forEach(($element) => {
+      this._isModuleHideable(module) && this._getModuleElementsToToggle(module).filter(Boolean).forEach(($element) => {
         $element.classList.toggle("hidden");
       });
+    }
+    _setModuleVisibility(module, hidden) {
+      this._isModuleHideable(module) && (this._getModuleElementsToToggle(module).filter(Boolean).forEach(($element) => {
+        $element.classList.toggle("hidden", hidden);
+      }), hidden || this._setModuleCollapsed(module, !1));
+    }
+    _isModuleHideable(module) {
+      return !!module?.exists && !notHideableModules.includes(module.moduleName);
+    }
+    /**
+     * Modules with a graph hide only the graph, "Item Instances Graph" hides its wrapper too.
+     */
+    _getModuleElementsToToggle(module) {
+      return module.elements.length > amountHeaderIndex ? module.elements.slice(0, amountHeaderIndex) : [module.elements[1]];
     }
     _renderSettings() {
       let $target = document.querySelector(".stats-breadcrumbs");
@@ -3969,7 +5194,7 @@ body.bcp-hide-add-button .bcp-add-button {
     }
     _init() {
       let pageName = this.page;
-      removeAdOnCurrentPage();
+      removeAdOnCurrentPage(), new NavigationMenu().init();
       let pageModule = pages[pageName];
       if (pageModule)
         try {
